@@ -63,9 +63,10 @@ class Client:
             buf += x
         return buf
 
-if __name__ == '__main__':
+def tests():
     c = Client(( "127.0.0.1", 10223 ))
     c.put("a", "aa")
+    c.put("a1", "old")
     c.put("a1", "aa1")
     c.put("a2", "aa2")
     c.put("a3", "aa3")
@@ -73,4 +74,10 @@ if __name__ == '__main__':
     assert c.get("a1") == "aa1"
 
     z = c.range("a", "a2")
-    assert z == [ [ 'a1', 'aa1' ], [ 'a', 'aa' ] ]
+    # [ [ 'a1', 'aa1' ], [ 'a', 'aa' ] ]
+    assert len(z) == 2
+    assert [ 'a1', 'aa1' ] in z
+    assert [ 'a', 'aa' ] in z
+
+if __name__ == '__main__':
+    tests()

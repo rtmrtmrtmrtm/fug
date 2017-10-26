@@ -9,6 +9,7 @@ class Server:
         self.db = { }
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("0.0.0.0", 10223))
         s.listen(100)
         th = threading.Thread(target=lambda : self.accept_loop(s))
@@ -31,6 +32,7 @@ class Server:
         key1 = msg[1]
         key2 = msg[2]
         ret = [ [ k, self.db[k] ] for k in self.db.keys() if (k >= key1 and k < key2 ) ]
+        ret = sorted(ret, key = lambda e : e[0])
         return ret
 
     def accept_loop(self, s):
