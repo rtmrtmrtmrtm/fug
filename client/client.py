@@ -8,6 +8,7 @@ import struct
 import re
 import Crypto.Hash.SHA256
 import Crypto.PublicKey.RSA
+import Crypto.Signature.PKCS1_PSS
 
 # return hex encoding of a cryptographic hash of s.
 def hash(s):
@@ -25,12 +26,20 @@ class Client:
     def __init__(self, name, hostport):
         self.name = name
         self.hostport = hostport
-        self.loadMasterKey()
+        self.masterkey = self.loadMasterKey()
 
     def put(self, k, v):
+        # generate signature over json of k and v,
+        # using master private key and RSASSA-PSS.
+        kv = json.dumps([ self.name, k, v ])
+        h = Crypto.Hash.SHA256.new()
+        h.update(kv.encode('utf-8'))
+        signer = Crypto.Signature.PKCS1_PSS.new(self.masterkey)
+        signature = signer.sign(h)
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
-        self.send_json(s, [ "put", k, v ])
+        self.send_json(s, [ "put", k, [ v, signature.hex() ] ])
         x = self.recv_json(s)
         s.close()
 
@@ -41,7 +50,8 @@ class Client:
         self.send_json(s, [ "get", k ])
         x = self.recv_json(s)
         s.close()
-        return x
+        # x is [ v, signature([name, k, v]) ]
+        return x[0]
 
     # list of [ key, value ]
     def range(self, key1, key2):
@@ -50,7 +60,12 @@ class Client:
         self.send_json(s, [ "range", key1, key2 ])
         x = self.recv_json(s)
         s.close()
-        return x
+        x1 = [ ]
+        for xx in x:
+            # xx is [ key, [ value, signature ] ]
+            # eliminate signature
+            x1.append( [ xx[0], xx[1][0] ] )
+        return x1
 
     def send_json(self, s, obj):
         txt = bytes(json.dumps(obj), 'utf-8')
