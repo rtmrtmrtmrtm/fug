@@ -5,12 +5,27 @@
 import socket
 import json
 import struct
+import re
+import Crypto.Hash.SHA256
+import Crypto.PublicKey.RSA
+
+# return hex encoding of a cryptographic hash of s.
+def hash(s):
+    if type(s) == str:
+        # turn unicode into bytes.
+        s = s.encode('utf-8')
+    h = Crypto.Hash.SHA256.new()
+    h.update(s)
+    return h.hexdigest()
 
 class Client:
 
+    # name is user's human-readable name for her/himself, e.g. "sally".
     # hostport is server address, e.g. ( "127.0.0.1", 10223 )
-    def __init__(self, hostport):
+    def __init__(self, name, hostport):
+        self.name = name
         self.hostport = hostport
+        self.loadMasterKey()
 
     def put(self, k, v):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -63,8 +78,38 @@ class Client:
             buf += x
         return buf
 
+    # given the local user's name, either load public/private
+    # key from a file, or create a key pair and store it.
+    # returns a Crypto RSA key object.
+    def loadMasterKey(self):
+        hash('xx')
+        name1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.name)
+        keyfile = 'master-%s.pem' % (name1)
+        f = None
+        try:
+            f = open(keyfile, 'rb')
+        except:
+            pass
+
+        if f != None:
+            kx = f.read()
+            f.close()
+            key = Crypto.PublicKey.RSA.importKey(kx)
+            print("read existing master key for %s" % (self.name))
+            return key
+
+        print("creating new master key for %s" % (self.name))
+        key = Crypto.PublicKey.RSA.generate(2048)
+        f = open(keyfile, "wb")
+        f.write(key.exportKey('PEM'))
+        f.close()
+
+        return key
+
+
 def tests():
-    c = Client(( "127.0.0.1", 10223 ))
+    c = Client("client-test", ( "127.0.0.1", 10223 ))
+
     c.put("a", "aa")
     c.put("a1", "old")
     c.put("a1", "aa1")
