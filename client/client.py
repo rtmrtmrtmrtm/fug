@@ -110,7 +110,6 @@ class Client:
             kx = f.read()
             f.close()
             key = Crypto.PublicKey.RSA.importKey(kx)
-            print("read existing master key for %s" % (self.name))
             return key
 
         print("creating new master key for %s" % (self.name))
@@ -120,7 +119,6 @@ class Client:
         f.close()
 
         return key
-
 
 def tests():
     c = Client("client-test", ( "127.0.0.1", 10223 ))
