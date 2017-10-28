@@ -26,6 +26,10 @@ class Client:
     def __init__(self, name, hostport):
         self.name = name
         self.hostport = hostport
+
+        # XXX it's crazy to leave the master private key laying around.
+        # ideally a separate agent process that would sign a certificate
+        # saying that this app's private key speaks for the master.
         self.masterkey = self.loadMasterKey()
 
     def put(self, k, v):
@@ -119,6 +123,10 @@ class Client:
         f.close()
 
         return key
+
+    # return the master public key.
+    def publickey(self):
+        return self.masterkey.publickey()
 
 def tests():
     c = Client("client-test", ( "127.0.0.1", 10223 ))
