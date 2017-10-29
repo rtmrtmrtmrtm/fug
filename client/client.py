@@ -55,7 +55,10 @@ class Client:
         x = self.recv_json(s)
         s.close()
         # x is [ v, signature([name, k, v]) ]
-        return x[0]
+        if x != None:
+            return x[0]
+        else:
+            return None
 
     # list of [ key, value ]
     def range(self, key1, key2):

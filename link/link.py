@@ -32,19 +32,19 @@ class Link:
         s = s[0:-1]
         return s
 
-    # we want to link to someone and call them othername.
-    def go(self, othername):
+    # we want to initiate a link to someone and call them othername.
+    def gofirst(self, othername):
         c = client.Client(self.myname, self.server)
         phrase = self.make_phrase()
 
         # what should be in the value we insert with key=phrase?
-        # 'link'
+        # 'link1'
         # our master public key.
         # the phrase.
         # our own name for ourself.
         # our name for the target person.
         pub = c.publickey().exportKey('PEM').hex()
-        value = [ 'link', pub, phrase, self.myname, othername ]
+        value = [ 'link1', pub, phrase, self.myname, othername ]
         c.put(phrase, value)
 
         # check that something else wasn't already there with key=phrase.
@@ -56,13 +56,77 @@ class Link:
         print("The phrase is %s" % (phrase))
         print("They should run link.py %s %s %s" % (othername, self.myname, phrase))
 
+    def yn(self):
+        while True:
+            sys.stdout.flush()
+            x = sys.stdin.readline()
+            if x == '':
+                sys.exit(1)
+            if x[0] in [ 'y', 'Y' ]:
+                return True
+            if x[0] in [ 'n', 'N' ]:
+                return False
+            sys.stdout.write("Please answer y or n: ")
+
+    # we want to respond to a link from someone and call them othername.
+    def gosecond(self, othername, phrase):
+        c = client.Client(self.myname, self.server)
+
+        # othername already inserted info under phrase.
+        value = c.get(phrase)
+        if value == None or type(value) != list or len(value) != 5:
+            print("Phrase is wrong or missing in DB.")
+            sys.exit(1)
+
+        [ xlink, xpub, xphrase, xname1, xname2 ] = value
+        if xlink != 'link1' or xphrase != phrase:
+            print("Phrase has bad content in DB.")
+            sys.exit(1)
+
+        if xname1 != othername:
+            sys.stdout.write("Other person calls him/herself %s; OK? " % (xname1))
+            ok = self.yn()
+            if ok != True:
+                sys.exit(1)
+
+        if xname2 != self.myname:
+            sys.stdout.write("Other person calls you %s; OK? " % (xname2))
+            ok = self.yn()
+            if ok != True:
+                sys.exit(1)
+
+        # now insert an answer into the DB.
+        # the statement is "the [other] person who knows the phrase has public key X".
+        # key is phrase-answer
+        pub = c.publickey().exportKey('PEM').hex()
+        value = [ 'link2', pub, phrase, self.myname, othername ]
+        c.put(phrase + "-answer", value)
+
+        # check that something else wasn't already there with key=phrase.
+        vx = c.get(phrase + "-answer")
+        if vx != value:
+            printf("Phrase collision!")
+            sys.exit(1)
+
+        print("%s should see your answer now." % (othername))
+
+        # ... insert othername/pub into my friends list.
+
 if __name__ == '__main__':
+    phrase = None
     if len(sys.argv) == 3:
         myname = sys.argv[1]
         othername = sys.argv[2]
+    elif len(sys.argv) == 4:
+        myname = sys.argv[1]
+        othername = sys.argv[2]
+        phrase = sys.argv[3]
     else:
         sys.stderr.write("Usage: link myname othername\n")
         sys.stderr.write("       link myname othername phrase\n")
         sys.exit(1)
     ch = Link(("127.0.0.1", 10223), myname)
-    ch.go(othername)
+    if phrase == None:
+        ch.gofirst(othername)
+    else:
+        ch.gosecond(othername, phrase)
