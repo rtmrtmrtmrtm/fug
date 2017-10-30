@@ -39,6 +39,10 @@ class Link:
         c = client.Client(self.myname, self.server)
         phrase = self.make_phrase()
 
+        sys.stdout.write("Enter a personal message for %s: " % (othername))
+        sys.stdout.flush()
+        message = sys.stdin.readline().strip()
+
         # what should be in the value we insert with key=phrase?
         # 'link1'
         # our master public key.
@@ -46,7 +50,7 @@ class Link:
         # our own name for ourself.
         # our name for the target person.
         pub = c.publickey().exportKey('PEM').hex()
-        value = [ 'link1', pub, phrase, self.myname, othername ]
+        value = [ 'link1', pub, phrase, message ]
         c.put(phrase, value)
 
         # check that something else wasn't already there with key=phrase.
@@ -57,6 +61,30 @@ class Link:
 
         print("The phrase is %s" % (phrase))
         print("They should run link.py %s %s %s" % (othername, self.myname, phrase))
+        print("Waiting for a reply from %s..." % (othername))
+
+        while True:
+            vy = c.get(phrase + "-answer")
+            if vy != None:
+                break
+            time.sleep(1)
+
+        if type(vy) != list or len(vy) != 4:
+            print("Phrase entry is wrong in DB.")
+            sys.exit(1)
+
+        [ xlink, xpub, xphrase, xmessage ] = vy
+        if xlink != 'link2' or xphrase != phrase:
+            print("Answering phrase is wrong in DB.")
+            sys.exit(1)
+
+        sys.stdout.write("Personal message is \"%s\"; OK? " % (xmessage))
+        ok = util.yn()
+        if ok != True:
+            sys.exit(1)
+
+        # insert into our known list in the DB.
+        self.save_known(c, othername, xpub)
 
     def save_known(self, c, othername, pub):
         # hash the name to produce the key in order to obscure the name.
@@ -77,50 +105,35 @@ class Link:
         kk2 = my_fingerprint + '-known2-' + util.hash(othername + c.masterrandom.hex())
         c.put(kk2, known_value)
 
-    def yn(self):
-        while True:
-            sys.stdout.flush()
-            x = sys.stdin.readline()
-            if x == '':
-                sys.exit(1)
-            if x[0] in [ 'y', 'Y' ]:
-                return True
-            if x[0] in [ 'n', 'N' ]:
-                return False
-            sys.stdout.write("Please answer y or n: ")
-
     # we want to respond to a link from someone and call them othername.
     def gosecond(self, othername, phrase):
         c = client.Client(self.myname, self.server)
 
         # othername already inserted info under phrase.
         value = c.get(phrase)
-        if value == None or type(value) != list or len(value) != 5:
-            print("Phrase is wrong or missing in DB.")
+        if value == None or type(value) != list or len(value) != 4:
+            print("Phrase entry is wrong or missing in DB.")
             sys.exit(1)
 
-        [ xlink, xpub, xphrase, xname1, xname2 ] = value
+        [ xlink, xpub, xphrase, xmessage ] = value
         if xlink != 'link1' or xphrase != phrase:
             print("Phrase has bad content in DB.")
             sys.exit(1)
 
-        if xname1 != othername:
-            sys.stdout.write("Other person calls him/herself %s; OK? " % (xname1))
-            ok = self.yn()
-            if ok != True:
-                sys.exit(1)
+        sys.stdout.write("Personal message is \"%s\"; OK? " % (xmessage))
+        ok = util.yn()
+        if ok != True:
+            sys.exit(1)
 
-        if xname2 != self.myname:
-            sys.stdout.write("Other person calls you %s; OK? " % (xname2))
-            ok = self.yn()
-            if ok != True:
-                sys.exit(1)
+        sys.stdout.write("Enter a personal message for %s: " % (othername))
+        sys.stdout.flush()
+        mymessage = sys.stdin.readline().strip()
 
         # now insert an answer into the DB.
         # the statement is "the [other] person who knows the phrase has public key X".
         # key is phrase-answer
         pub = c.publickey().exportKey('PEM').hex()
-        value = [ 'link2', pub, phrase, self.myname, othername ]
+        value = [ 'link2', pub, phrase, mymessage ]
         c.put(phrase + "-answer", value)
 
         # check that something else wasn't already there with key=phrase.
@@ -133,9 +146,6 @@ class Link:
 
         # insert into our known list in the DB.
         self.save_known(c, othername, xpub)
-
-        # ... insert othername/pub into my friends list.
-        # ... fix gofirst() to read our reply.
 
 if __name__ == '__main__':
     phrase = None

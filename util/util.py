@@ -1,5 +1,6 @@
 import Crypto.Hash.SHA256
 import binascii
+import sys
 
 # return hex encoding of a cryptographic hash of s.
 # returns a 64-byte str like '5dd389...'.
@@ -24,3 +25,16 @@ def fingerprint(key):
 
 def unhex(s):
     return binascii.unhexlify(s)
+
+
+def yn():
+    while True:
+        sys.stdout.flush()
+        x = sys.stdin.readline()
+        if x == '':
+            sys.exit(1)
+        if x[0] in [ 'y', 'Y' ]:
+            return True
+        if x[0] in [ 'n', 'N' ]:
+            return False
+        sys.stdout.write("Please answer y or n: ")
