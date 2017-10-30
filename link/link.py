@@ -13,6 +13,8 @@ import Crypto.Random.random
 
 sys.path.append("../client")
 import client
+sys.path.append("../util")
+import util
 
 class Link:
     # server is e.g. ( "127.0.0.1", 10223 )
@@ -55,6 +57,25 @@ class Link:
 
         print("The phrase is %s" % (phrase))
         print("They should run link.py %s %s %s" % (othername, self.myname, phrase))
+
+    def save_known(self, c, othername, pub):
+        # hash the name to produce the key in order to obscure the name.
+        # put twice, so that it can be looked up by either
+        # name or public key fingerprint.
+        # XXX should seal the value.
+
+        print("Remembering user %s." % (othername))
+
+        my_fingerprint = util.fingerprint(c.publickey())
+        pub1 = util.unhex(pub)
+        pub2 = Crypto.PublicKey.RSA.importKey(pub1)
+        other_fingerprint = util.fingerprint(pub2)
+
+        known_value = [ 'known', pub, othername ]
+        kk1 = my_fingerprint + '-known1-' + util.hash(other_fingerprint + c.masterrandom.hex())
+        c.put(kk1, known_value)
+        kk2 = my_fingerprint + '-known2-' + util.hash(othername + c.masterrandom.hex())
+        c.put(kk2, known_value)
 
     def yn(self):
         while True:
@@ -110,7 +131,11 @@ class Link:
 
         print("%s should see your answer now." % (othername))
 
+        # insert into our known list in the DB.
+        self.save_known(c, othername, xpub)
+
         # ... insert othername/pub into my friends list.
+        # ... fix gofirst() to read our reply.
 
 if __name__ == '__main__':
     phrase = None

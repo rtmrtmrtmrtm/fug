@@ -10,15 +10,6 @@ import Crypto.Hash.SHA256
 import Crypto.PublicKey.RSA
 import Crypto.Signature.PKCS1_PSS
 
-# return hex encoding of a cryptographic hash of s.
-def hash(s):
-    if type(s) == str:
-        # turn unicode into bytes.
-        s = s.encode('utf-8')
-    h = Crypto.Hash.SHA256.new()
-    h.update(s)
-    return h.hexdigest()
-
 class Client:
 
     # name is user's human-readable name for her/himself, e.g. "sally".
@@ -30,7 +21,8 @@ class Client:
         # XXX it's crazy to leave the master private key laying around.
         # ideally a separate agent process that would sign a certificate
         # saying that this app's private key speaks for the master.
-        self.masterkey = self.loadMasterKey()
+        # sets self.masterkey and self.masterrandom
+        self._loadMasterKey()
 
     def put(self, k, v):
         # generate signature over json of k and v,
@@ -100,11 +92,15 @@ class Client:
             buf += x
         return buf
 
+    ###
+    ### below are methods for authentication, signing, and sealing.
+    ### perhaps they should be somewhere else.
+    ###
+
     # given the local user's name, either load public/private
     # key from a file, or create a key pair and store it.
     # returns a Crypto RSA key object.
-    def loadMasterKey(self):
-        hash('xx')
+    def _loadMasterKey(self):
         name1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.name)
         keyfile = 'master-%s.pem' % (name1)
         f = None
@@ -117,15 +113,35 @@ class Client:
             kx = f.read()
             f.close()
             key = Crypto.PublicKey.RSA.importKey(kx)
-            return key
+        else:
+            print("creating new master key for %s" % (self.name))
+            key = Crypto.PublicKey.RSA.generate(2048)
+            f = open(keyfile, "wb")
+            f.write(key.exportKey('PEM'))
+            f.close()
 
-        print("creating new master key for %s" % (self.name))
-        key = Crypto.PublicKey.RSA.generate(2048)
-        f = open(keyfile, "wb")
-        f.write(key.exportKey('PEM'))
-        f.close()
+        self.masterkey = key
 
-        return key
+        keyfile = 'random-%s.pem' % (name1)
+        f = None
+        try:
+            f = open(keyfile, 'rb')
+        except:
+            pass
+
+        if f != None:
+            rrr = f.read()
+            f.close()
+        else:
+            print("creating new master randomness for %s" % (self.name))
+            rrr = Crypto.Random.new().read(32)
+            f = open(keyfile, "wb")
+            f.write(rrr)
+            f.close()
+
+        # type is bytes
+        self.masterrandom = rrr
+
 
     # return the master public key.
     def publickey(self):
