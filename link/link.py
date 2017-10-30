@@ -147,9 +147,22 @@ class Link:
         # insert into our known list in the DB.
         self.save_known(c, othername, xpub)
 
+    def list(self):
+        c = client.Client(self.myname, self.server)
+        my_fingerprint = util.fingerprint(c.publickey())
+        a = c.range(my_fingerprint + "-known1-", my_fingerprint + "-known2-")
+        for e in a:
+            # [ key, [ 'known', publickey, name ] ]
+            print("%s" % (e[1][2]))
+
 if __name__ == '__main__':
     phrase = None
-    if len(sys.argv) == 3:
+    server = ( "127.0.0.1", 10223 )
+    if len(sys.argv) == 3 and sys.argv[2] == "--list":
+        ch = Link(server, sys.argv[1])
+        ch.list()
+        sys.exit(0)
+    elif len(sys.argv) == 3:
         myname = sys.argv[1]
         othername = sys.argv[2]
     elif len(sys.argv) == 4:
@@ -159,8 +172,9 @@ if __name__ == '__main__':
     else:
         sys.stderr.write("Usage: link myname othername\n")
         sys.stderr.write("       link myname othername phrase\n")
+        sys.stderr.write("       link myname --list\n")
         sys.exit(1)
-    ch = Link(("127.0.0.1", 10223), myname)
+    ch = Link(server, myname)
     if phrase == None:
         ch.gofirst(othername)
     else:
