@@ -55,21 +55,57 @@ class Client:
         x = self.recv_json(s)
         s.close()
 
-    # None, or a value.
-    # note the signature covers the key and value together.
-    # XXX should take an argument indicating who we expect
-    # to have signed it, so we can check signature.
-    def get(self, k):
+    # low-level get; does not check signature.
+    # returns None, or [ value, signature, fingerprint ]
+    def lowget(self, k):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "get", k ])
         x = self.recv_json(s)
         s.close()
-        # x is [ v, signature([nickname, k, v]) ]
-        if x != None:
-            return x[0]
-        else:
+        return x
+
+    # None, or a value.
+    # note the signature covers the key and value together.
+    # checks that the value is signed by the public
+    # key it claims to be signed by (not very useful by itself).
+    # XXX should take an argument indicating who we expect
+    # to have signed it.
+    def get(self, k):
+        v = self.lowget(k)
+        if v == None:
+            # no DB entry for k.
             return None
+
+        if self.check(k, v):
+            return v[0]
+
+        # signature did not verify!
+        return None
+
+    # check the signature on a k/v fetched from DB.
+    # v is as returned by lowget.
+    def check(self, k, v):
+        pkv = self.lowget("finger-" + v[2])
+        if pkv == None:
+            # no entry for the fingerprint,
+            # so pretend the DB entry is entirely missing.
+            return False
+        
+        # v is [ value, signature, fingerprint ]
+        # pkv [ [ nickname, public key ], signature, fingerprint ]
+
+        # check the signature
+        public = util.unbox(pkv[0][1])
+        kv = json.dumps([ k, v[0] ])
+        h = Crypto.Hash.SHA256.new()
+        h.update(kv.encode('utf-8'))
+        verifier = Crypto.Signature.PKCS1_PSS.new(public)
+        ok = verifier.verify(h, util.unhex(v[1]))
+        if ok == False:
+            return False
+
+        return True
 
     # list of [ key, value ]
     def range(self, key1, key2):
@@ -80,9 +116,9 @@ class Client:
         s.close()
         x1 = [ ]
         for xx in x:
-            # xx is [ key, [ value, signature ] ]
-            # eliminate signature
-            x1.append( [ xx[0], xx[1][0] ] )
+            # xx is [ key, [ value, signature, fingerprint ] ]
+            if self.check(xx[0], xx[1]):
+                x1.append( [ xx[0], xx[1][0] ] )
         return x1
 
     def send_json(self, s, obj):
