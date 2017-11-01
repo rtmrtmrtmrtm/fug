@@ -85,25 +85,7 @@ class Link:
             sys.exit(1)
 
         # insert into our known list in the DB.
-        self.save_known(c, othername, xpub)
-
-    def save_known(self, c, othername, pub):
-        # hash the name to produce the key in order to obscure the name.
-        # put twice, so that it can be looked up by either
-        # name or public key fingerprint.
-        # XXX should seal the value.
-
-        print("Remembering user %s." % (othername))
-
-        my_fingerprint = c.finger()
-        pub2 = util.unbox(pub)
-        other_fingerprint = util.fingerprint(pub2)
-
-        known_value = [ 'known', pub, othername ]
-        kk1 = my_fingerprint + '-known1-' + util.hash(other_fingerprint + c.masterrandom.hex())
-        c.put(kk1, known_value)
-        kk2 = my_fingerprint + '-known2-' + util.hash(othername + c.masterrandom.hex())
-        c.put(kk2, known_value)
+        c.save_known(othername, xpub)
 
     # we want to respond to a link from someone and call them othername.
     def gosecond(self, othername, phrase):
@@ -145,12 +127,11 @@ class Link:
         print("%s should see your answer now." % (othername))
 
         # insert into our known list in the DB.
-        self.save_known(c, othername, xpub)
+        c.save_known(othername, xpub)
 
     def list(self):
         c = client.Client(self.nickname, self.server)
-        my_fingerprint = c.finger()
-        a = c.range(my_fingerprint + "-known1-", my_fingerprint + "-known2-")
+        a = c.range('known1-' + c.finger(), "known1-" + c.finger() + "~")
         for e in a:
             # [ key, [ 'known', publickey, name ] ]
             print("%s" % (e[1][2]))

@@ -10,6 +10,12 @@
 #   key = "finger-" + my public key fingerprint
 #   value = [ nickname, public key ]
 #
+# format of "known user" records that bind a local
+# nickname to a public key fingerprint.
+#  key = "known1-" + myfinger + hash(otherfinger)
+#  key = "known2-" + myfinger + hash(othernickname)
+#  value = [ publickey, nickname ]
+#
 
 import socket
 import json
@@ -216,11 +222,57 @@ class Client:
     # the user can be assured that a given name always
     # refers to the same user.
     def finger2nickname(self, finger):
+        x = self.known_finger(finger)
+        if x != None:
+            return x[1]
         x = self.get("finger-" + finger)
         if x == None:
             return None
         else:
+            self.save_known(x[0], x[1])
             return x[0]
+
+    # save a nickname/fingerprint relationship that we've learned,
+    # so that in future we always use the same nickname for
+    # the corresponding public key.
+    # XXX should seal these so only inserting user can read them.
+    def save_known(self, nickname, pub):
+        # hash the nickname to produce the key in order to obscure the name.
+        # put twice, so that it can be looked up by either
+        # name or public key fingerprint.
+
+        if self.known_nickname(nickname):
+            print("Nickname %s is already known." % (nickname))
+            return
+
+        print("Remembering nickname %s." % (nickname))
+
+        pub2 = util.unbox(pub)
+        other_fingerprint = util.fingerprint(pub2)
+
+        known_value = [ pub, nickname ]
+
+        kk1 = "known1-" + self.finger() + util.hash(other_fingerprint + self.masterrandom.hex())
+        self.put(kk1, known_value)
+
+        kk2 = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
+        self.put(kk2, known_value)
+
+    # do we know about the indicated key fingerprint?
+    # return [ publickey, nickname ] or None
+    def known_finger(self, finger):
+        key = "known1-" + self.finger() + util.hash(finger + self.masterrandom.hex())
+        # XXX assert that we signed the k/v pair!
+        x = self.get(key)
+        return x
+
+    # do we know about the indicated nickname?
+    # return [ publickey, nickname ] or None
+    def known_nickname(self, nickname):
+        key = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
+        # XXX assert that we signed the k/v pair!
+        x = self.get(key)
+        return x
 
 def tests():
     c = Client("client-test", ( "127.0.0.1", 10223 ))
