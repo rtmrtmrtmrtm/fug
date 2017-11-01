@@ -229,21 +229,38 @@ class Client:
         if x == None:
             return None
         else:
-            self.save_known(x[0], x[1])
-            return x[0]
+            nickname = x[0]
+            nickname = self.save_known(nickname, x[1])
+            return nickname
 
     # save a nickname/fingerprint relationship that we've learned,
     # so that in future we always use the same nickname for
     # the corresponding public key.
     # XXX should seal these so only inserting user can read them.
+    # returns the nickname, possibly different.
     def save_known(self, nickname, pub):
         # hash the nickname to produce the key in order to obscure the name.
         # put twice, so that it can be looked up by either
         # name or public key fingerprint.
 
-        if self.known_nickname(nickname):
-            print("Nickname %s is already known." % (nickname))
-            return
+        x = self.known_nickname(nickname)
+        if x != None:
+            # we've already saved a public key for this nickname.
+            pub1 = x[0]
+            if pub1 == pub:
+                # it's the same user.
+                print("Nickname %s is already known; same user." % (nickname))
+                return
+            print("Nickname %s is already known, for a different user!" % (nickname))
+            # choose a different, unused, nickname.
+            while True:
+                m = re.match(r'^(.*)-([0-9]+)$', nickname)
+                if m == None:
+                    nickname = nickname + "-1"
+                else:
+                    nickname = m.group(1) + "-" + str(int(m.group(2)) + 1)
+                if self.known_nickname(nickname) == None:
+                    break
 
         print("Remembering nickname %s." % (nickname))
 
@@ -257,6 +274,8 @@ class Client:
 
         kk2 = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
         self.put(kk2, known_value)
+
+        return nickname
 
     # do we know about the indicated key fingerprint?
     # return [ publickey, nickname ] or None
