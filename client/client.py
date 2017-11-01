@@ -1,21 +1,34 @@
 #
 # client library
+# includes a bunch of useful stuff beyond basic server interaction.
+#
+# common format of all data inserted into DB for put(key, value):
+#   dbkey = key
+#   dbvalue = [ value, sign(key + value), myfingerprint ]
+#
+# format of a fingerprint -> publickey record:
+#   key = "finger-" + my public key fingerprint
+#   value = [ nickname, public key ]
 #
 
 import socket
 import json
 import struct
 import re
+import sys
 import Crypto.Hash.SHA256
 import Crypto.PublicKey.RSA
 import Crypto.Signature.PKCS1_PSS
 
+sys.path.append("../util")
+import util
+
 class Client:
 
-    # name is user's human-readable name for her/himself, e.g. "sally".
+    # nickname is user's human-readable name for her/himself, e.g. "sally".
     # hostport is server address, e.g. ( "127.0.0.1", 10223 )
-    def __init__(self, name, hostport):
-        self.name = name
+    def __init__(self, nickname, hostport):
+        self.nickname = nickname
         self.hostport = hostport
 
         # XXX it's crazy to leave the master private key laying around.
@@ -24,10 +37,13 @@ class Client:
         # sets self.masterkey and self.masterrandom
         self._loadMasterKey()
 
+    # XXX should take an argument indicating who (if anyone)
+    # we want to be able to read the k/v -- i.e. how to
+    # seal it.
     def put(self, k, v):
         # generate signature over json of k and v,
         # using master private key and RSASSA-PSS.
-        kv = json.dumps([ self.name, k, v ])
+        kv = json.dumps([ k, v ])
         h = Crypto.Hash.SHA256.new()
         h.update(kv.encode('utf-8'))
         signer = Crypto.Signature.PKCS1_PSS.new(self.masterkey)
@@ -35,18 +51,21 @@ class Client:
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
-        self.send_json(s, [ "put", k, [ v, signature.hex() ] ])
+        self.send_json(s, [ "put", k, [ v, signature.hex(), self.finger() ] ])
         x = self.recv_json(s)
         s.close()
 
     # None, or a value.
+    # note the signature covers the key and value together.
+    # XXX should take an argument indicating who we expect
+    # to have signed it, so we can check signature.
     def get(self, k):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "get", k ])
         x = self.recv_json(s)
         s.close()
-        # x is [ v, signature([name, k, v]) ]
+        # x is [ v, signature([nickname, k, v]) ]
         if x != None:
             return x[0]
         else:
@@ -97,12 +116,15 @@ class Client:
     ### perhaps they should be somewhere else.
     ###
 
-    # given the local user's name, either load public/private
+    # given the local user's nickname, either load public/private
     # key from a file, or create a key pair and store it.
+    # the latter creates a new user identity.
     # returns a Crypto RSA key object.
     def _loadMasterKey(self):
-        name1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.name)
-        keyfile = 'master-%s.pem' % (name1)
+        dir = "/tmp"
+
+        nickname1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.nickname)
+        keyfile = dir + "/" + 'fug-master-%s.pem' % (nickname1)
         f = None
         try:
             f = open(keyfile, 'rb')
@@ -114,7 +136,7 @@ class Client:
             f.close()
             key = Crypto.PublicKey.RSA.importKey(kx)
         else:
-            print("creating new master key for %s" % (self.name))
+            print("creating new master key for %s" % (self.nickname))
             key = Crypto.PublicKey.RSA.generate(2048)
             f = open(keyfile, "wb")
             f.write(key.exportKey('PEM'))
@@ -122,7 +144,7 @@ class Client:
 
         self.masterkey = key
 
-        keyfile = 'random-%s.pem' % (name1)
+        keyfile = dir + "/" + 'fug-random-%s.pem' % (nickname1)
         f = None
         try:
             f = open(keyfile, 'rb')
@@ -133,7 +155,7 @@ class Client:
             rrr = f.read()
             f.close()
         else:
-            print("creating new master randomness for %s" % (self.name))
+            print("creating new master randomness for %s" % (self.nickname))
             rrr = Crypto.Random.new().read(32)
             f = open(keyfile, "wb")
             f.write(rrr)
@@ -142,10 +164,27 @@ class Client:
         # type is bytes
         self.masterrandom = rrr
 
+        self.put("finger-" + self.finger(), [ self.nickname, util.box(self.publickey()) ] )
 
     # return the master public key.
     def publickey(self):
         return self.masterkey.publickey()
+
+    # fingerprint of my master public key.
+    # returns a hex str.
+    def finger(self):
+        return util.fingerprint(self.publickey())
+
+    # look up a fingerprint in the DB, return nickname.
+    # XXX should return a permanent local nickname, so that
+    # the user can be assured that a given name always
+    # refers to the same user.
+    def finger2nickname(self, finger):
+        x = self.get("finger-" + finger)
+        if x == None:
+            return None
+        else:
+            return x[0]
 
 def tests():
     c = Client("client-test", ( "127.0.0.1", 10223 ))

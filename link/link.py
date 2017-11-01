@@ -18,10 +18,10 @@ import util
 
 class Link:
     # server is e.g. ( "127.0.0.1", 10223 )
-    # myname is my name for myself, like "sally".
-    def __init__(self, server, myname):
+    # nickname is my name for myself, like "sally".
+    def __init__(self, server, nickname):
         self.server = server
-        self.myname = myname
+        self.nickname = nickname
 
     # generate the string to read to the other person over
     # the telephone.
@@ -36,7 +36,7 @@ class Link:
 
     # we want to initiate a link to someone and call them othername.
     def gofirst(self, othername):
-        c = client.Client(self.myname, self.server)
+        c = client.Client(self.nickname, self.server)
         phrase = self.make_phrase()
 
         sys.stdout.write("Enter a personal message for %s: " % (othername))
@@ -49,6 +49,7 @@ class Link:
         # the phrase.
         # our own name for ourself.
         # our name for the target person.
+        # XXX the link DB entry should expire quickly.
         pub = c.publickey().exportKey('PEM').hex()
         value = [ 'link1', pub, phrase, message ]
         c.put(phrase, value)
@@ -60,7 +61,7 @@ class Link:
             sys.exit(1)
 
         print("The phrase is %s" % (phrase))
-        print("They should run link.py %s %s %s" % (othername, self.myname, phrase))
+        print("They should run link.py %s %s %s" % (othername, self.nickname, phrase))
         print("Waiting for a reply from %s..." % (othername))
 
         while True:
@@ -94,9 +95,8 @@ class Link:
 
         print("Remembering user %s." % (othername))
 
-        my_fingerprint = util.fingerprint(c.publickey())
-        pub1 = util.unhex(pub)
-        pub2 = Crypto.PublicKey.RSA.importKey(pub1)
+        my_fingerprint = c.finger()
+        pub2 = util.unbox(pub)
         other_fingerprint = util.fingerprint(pub2)
 
         known_value = [ 'known', pub, othername ]
@@ -107,7 +107,7 @@ class Link:
 
     # we want to respond to a link from someone and call them othername.
     def gosecond(self, othername, phrase):
-        c = client.Client(self.myname, self.server)
+        c = client.Client(self.nickname, self.server)
 
         # othername already inserted info under phrase.
         value = c.get(phrase)
@@ -132,7 +132,7 @@ class Link:
         # now insert an answer into the DB.
         # the statement is "the [other] person who knows the phrase has public key X".
         # key is phrase-answer
-        pub = c.publickey().exportKey('PEM').hex()
+        pub = util.box(c.publickey())
         value = [ 'link2', pub, phrase, mymessage ]
         c.put(phrase + "-answer", value)
 
@@ -148,8 +148,8 @@ class Link:
         self.save_known(c, othername, xpub)
 
     def list(self):
-        c = client.Client(self.myname, self.server)
-        my_fingerprint = util.fingerprint(c.publickey())
+        c = client.Client(self.nickname, self.server)
+        my_fingerprint = c.finger()
         a = c.range(my_fingerprint + "-known1-", my_fingerprint + "-known2-")
         for e in a:
             # [ key, [ 'known', publickey, name ] ]
@@ -163,18 +163,18 @@ if __name__ == '__main__':
         ch.list()
         sys.exit(0)
     elif len(sys.argv) == 3:
-        myname = sys.argv[1]
+        nickname = sys.argv[1]
         othername = sys.argv[2]
     elif len(sys.argv) == 4:
-        myname = sys.argv[1]
+        nickname = sys.argv[1]
         othername = sys.argv[2]
         phrase = sys.argv[3]
     else:
-        sys.stderr.write("Usage: link myname othername\n")
-        sys.stderr.write("       link myname othername phrase\n")
-        sys.stderr.write("       link myname --list\n")
+        sys.stderr.write("Usage: link nickname othername\n")
+        sys.stderr.write("       link nickname othername phrase\n")
+        sys.stderr.write("       link nickname --list\n")
         sys.exit(1)
-    ch = Link(server, myname)
+    ch = Link(server, nickname)
     if phrase == None:
         ch.gofirst(othername)
     else:
