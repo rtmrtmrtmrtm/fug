@@ -43,17 +43,21 @@ class Chat:
         ts1 = 0
         while True:
             ts2 = int(time.time())
-            rows = c.range(self.roomid + "-" + str(ts1), self.roomid + "-" + str(ts2))
+            rows = c.range(self.roomid + "-" + str(ts1),
+                           self.roomid + "-" + str(ts2),
+                           None)
             for row in rows:
+                # row is [ key, [ 'message', txt ], nickname ]
                 key = row[0]
-                [ ty, txt ] = row[1]
-                [ roomid, timestamp, finger ] = key.split("-")
+                value = row[1]
+                nickname = row[2]
+                [ ty, txt ] = value
+                [ roomid, timestamp, fingerjunk ] = key.split("-")
                 timestamp = int(timestamp)
                 if timestamp > ts1 and ty == "message":
                     ts1 = timestamp
-                    if finger != c.finger():
-                        nn = c.finger2nickname(finger)
-                        print("%s: %s" % (nn, txt))
+                    if nickname != c.nickname():
+                        print("%s: %s" % (nickname, txt))
             time.sleep(1)
 
     def go_open(self):
@@ -98,13 +102,15 @@ class Chat:
         c = client.Client(self.nickname, self.server)
 
         ret = [ ]
-        a = c.range(c.finger() + "-known1-", c.finger() + "-known2-")
-        for e in a:
-            # [ key, [ 'known', publickey, name ] ]
-            othername = e[1][2]
-            otherpub = util.unbox(e[1][1])
+        knowns = c.known_list()
+        for e in knowns:
+            # e is [ publickey, nickname ]
+            othername = e[1]
+            otherpub = util.unbox(e[0])
             other_fingerprint = util.fingerprint(otherpub)
-            aa = c.range(other_fingerprint + "-room-", other_fingerprint + "-room-~")
+            aa = c.range(other_fingerprint + "-room-",
+                         other_fingerprint + "-room-~",
+                         othername)
             for ee in aa:
                 ret.append( ee[1] )
         

@@ -131,10 +131,10 @@ class Link:
 
     def list(self):
         c = client.Client(self.nickname, self.server)
-        a = c.range('known1-' + c.finger(), "known1-" + c.finger() + "~")
-        for e in a:
-            # [ key, [ 'known', publickey, name ] ]
-            print("%s" % (e[1][2]))
+        knowns = c.known_list()
+        for e in knowns:
+            # e is [ publickey, name ]
+            print("%s" % (e[1]))
 
 if __name__ == '__main__':
     phrase = None

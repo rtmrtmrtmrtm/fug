@@ -34,7 +34,7 @@ class Client:
     # nickname is user's human-readable name for her/himself, e.g. "sally".
     # hostport is server address, e.g. ( "127.0.0.1", 10223 )
     def __init__(self, nickname, hostport):
-        self.nickname = nickname
+        self.nickname_ = nickname
         self.hostport = hostport
 
         # XXX it's crazy to leave the master private key laying around.
@@ -42,6 +42,9 @@ class Client:
         # saying that this app's private key speaks for the master.
         # sets self.masterkey and self.masterrandom
         self._loadMasterKey()
+
+    def nickname(self):
+        return self.nickname_
 
     # XXX should take an argument indicating who (if anyone)
     # we want to be able to read the k/v -- i.e. how to
@@ -72,22 +75,20 @@ class Client:
         return x
 
     # None, or a value.
-    # note the signature covers the key and value together.
-    # checks that the value is signed by the public
-    # key it claims to be signed by (not very useful by itself).
-    # XXX should take an argument indicating who we expect
-    # to have signed it.
+    # checks that the key+value is signed by the public
+    # key it claims to be signed by.
+    # XXX should somehow check that it's signed by the expected user.
     def get(self, k):
         v = self.lowget(k)
         if v == None:
             # no DB entry for k.
             return None
 
-        if self.check(k, v):
-            return v[0]
+        if self.check(k, v) == False:
+            # signature did not verify at all.
+            return None
 
-        # signature did not verify!
-        return None
+        return v[0]
 
     # check the signature on a k/v fetched from DB.
     # v is as returned by lowget.
@@ -113,18 +114,24 @@ class Client:
 
         return True
 
-    # list of [ key, value ]
-    def range(self, key1, key2):
+    # list of [ key, value, nickname ]
+    # each nickname is the local nickname for the
+    # public key that signed the row.
+    # if signer!=None, only return lines signed by that nickname.
+    def range(self, key1, key2, signer):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "range", key1, key2 ])
         x = self.recv_json(s)
         s.close()
+
         x1 = [ ]
         for xx in x:
             # xx is [ key, [ value, signature, fingerprint ] ]
             if self.check(xx[0], xx[1]):
-                x1.append( [ xx[0], xx[1][0] ] )
+                nn = self.finger2nickname(xx[1][2])
+                if signer == None or signer == nn:
+                    x1.append( [ xx[0], xx[1][0], nn ] )
         return x1
 
     def send_json(self, s, obj):
@@ -165,7 +172,7 @@ class Client:
     def _loadMasterKey(self):
         dir = "/tmp"
 
-        nickname1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.nickname)
+        nickname1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.nickname())
         keyfile = dir + "/" + 'fug-master-%s.pem' % (nickname1)
         f = None
         try:
@@ -178,7 +185,7 @@ class Client:
             f.close()
             key = Crypto.PublicKey.RSA.importKey(kx)
         else:
-            print("creating new master key for %s" % (self.nickname))
+            print("creating new master key for %s" % (self.nickname()))
             key = Crypto.PublicKey.RSA.generate(2048)
             f = open(keyfile, "wb")
             f.write(key.exportKey('PEM'))
@@ -197,7 +204,7 @@ class Client:
             rrr = f.read()
             f.close()
         else:
-            print("creating new master randomness for %s" % (self.nickname))
+            print("creating new master randomness for %s" % (self.nickname()))
             rrr = Crypto.Random.new().read(32)
             f = open(keyfile, "wb")
             f.write(rrr)
@@ -206,7 +213,7 @@ class Client:
         # type is bytes
         self.masterrandom = rrr
 
-        self.put("finger-" + self.finger(), [ self.nickname, util.box(self.publickey()) ] )
+        self.put("finger-" + self.finger(), [ self.nickname(), util.box(self.publickey()) ] )
 
     # return the master public key.
     def publickey(self):
@@ -218,7 +225,7 @@ class Client:
         return util.fingerprint(self.publickey())
 
     # look up a fingerprint in the DB, return nickname.
-    # XXX should return a permanent local nickname, so that
+    # returns a permanent local nickname, so that
     # the user can be assured that a given name always
     # refers to the same user.
     def finger2nickname(self, finger):
@@ -251,8 +258,8 @@ class Client:
                 # it's the same user.
                 print("Nickname %s is already known; same user." % (nickname))
                 return
-            print("Nickname %s is already known, for a different user!" % (nickname))
             # choose a different, unused, nickname.
+            onickname = nickname
             while True:
                 m = re.match(r'^(.*)-([0-9]+)$', nickname)
                 if m == None:
@@ -261,6 +268,7 @@ class Client:
                     nickname = m.group(1) + "-" + str(int(m.group(2)) + 1)
                 if self.known_nickname(nickname) == None:
                     break
+            print("Nickname %s already in use; substituting  %s." % (onickname, nickname))
 
         print("Remembering nickname %s." % (nickname))
 
@@ -292,6 +300,19 @@ class Client:
         # XXX assert that we signed the k/v pair!
         x = self.get(key)
         return x
+
+    # fetch and return full "known" list.
+    # each entry is [ publickey, nickname ]
+    def known_list(self):
+        ret = [ ]
+        rows = self.range("known1-" + self.finger(),
+                          "known1-" + self.finger() + "~",
+                          self.nickname())
+        for row in rows:
+            # row is [ key, [ publickey, nickname ] ]
+            ret.append(row[1])
+        return ret
+
 
 def tests():
     c = Client("client-test", ( "127.0.0.1", 10223 ))
