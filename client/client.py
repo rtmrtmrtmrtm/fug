@@ -20,14 +20,19 @@
 import socket
 import json
 import struct
+import time
 import re
 import sys
+import fcntl
+import threading
 import Crypto.Hash.SHA256
 import Crypto.PublicKey.RSA
 import Crypto.Signature.PKCS1_PSS
 
 sys.path.append("../util")
 import util
+
+masterlock = threading.Lock()
 
 class Client:
 
@@ -58,9 +63,11 @@ class Client:
         signer = Crypto.Signature.PKCS1_PSS.new(self.masterkey)
         signature = signer.sign(h)
 
+        myfinger = self.finger()
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
-        self.send_json(s, [ "put", k, [ v, signature.hex(), self.finger() ] ])
+        self.send_json(s, [ "put", k, [ v, signature.hex(), myfinger ] ])
         x = self.recv_json(s)
         s.close()
 
@@ -77,23 +84,35 @@ class Client:
     # None, or a value.
     # checks that the key+value is signed by the public
     # key it claims to be signed by.
-    # XXX should somehow check that it's signed by the expected user.
-    def get(self, k):
+    # if signer != None, it's a local nickname and the record
+    # must have been signed by that nickname.
+    def get(self, k, signer):
         v = self.lowget(k)
         if v == None:
             # no DB entry for k.
             return None
 
+        # v is [ value, signature, fingerprint ]
+
         if self.check(k, v) == False:
             # signature did not verify at all.
             return None
+
+        if signer != None:
+            nn = self.finger2nickname(v[2])
+            if nn != signer:
+                # was not signed by signer.
+                return None
 
         return v[0]
 
     # check the signature on a k/v fetched from DB.
     # v is as returned by lowget.
     def check(self, k, v):
-        pkv = self.lowget("finger-" + v[2])
+        finger = v[2]
+
+        # retrieve the fingerprint's public key from the DB.
+        pkv = self.lowget("finger-" + finger)
         if pkv == None:
             # no entry for the fingerprint,
             # so pretend the DB entry is entirely missing.
@@ -102,8 +121,14 @@ class Client:
         # v is [ value, signature, fingerprint ]
         # pkv [ [ nickname, public key ], signature, fingerprint ]
 
-        # check the signature
+        # check that the fingerprint matches the public key.
         public = util.unbox(pkv[0][1])
+        f1 = util.fingerprint(public)
+        if f1 != finger:
+            print("client.check(): fingerprint mismatch")
+            return False
+
+        # check the signature
         kv = json.dumps([ k, v[0] ])
         h = Crypto.Hash.SHA256.new()
         h.update(kv.encode('utf-8'))
@@ -172,6 +197,24 @@ class Client:
     def _loadMasterKey(self):
         dir = "/tmp"
 
+        # avoid simultaneous master key creations.
+        # fcntl.lock() only seems to work between
+        # different processes -- two threads in the
+        # same process are both allowed to hold a
+        # fcntl lock.
+        f = open(dir + "/fug-lock", "w")
+        fcntl.lockf(f, fcntl.LOCK_EX)
+
+        # guard against threads in this process too.
+        masterlock.acquire()
+
+        self.__loadMasterKey(dir)
+
+        f.close()
+        masterlock.release()
+
+    def __loadMasterKey(self, dir):
+
         nickname1 = re.sub(r'[^a-zA-Z0-9-]', 'x', self.nickname())
         keyfile = dir + "/" + 'fug-master-%s.pem' % (nickname1)
         f = None
@@ -229,13 +272,16 @@ class Client:
     # the user can be assured that a given name always
     # refers to the same user.
     def finger2nickname(self, finger):
+        if finger == self.finger():
+            return self.nickname()
         x = self.known_finger(finger)
         if x != None:
             return x[1]
-        x = self.get("finger-" + finger)
+        x = self.get("finger-" + finger, None)
         if x == None:
             return None
         else:
+            # x is [ nickname, public key ]
             nickname = x[0]
             nickname = self.save_known(nickname, x[1])
             return nickname
@@ -253,6 +299,7 @@ class Client:
         x = self.known_nickname(nickname)
         if x != None:
             # we've already saved a public key for this nickname.
+            # or we ourselves are using this nickname.
             pub1 = x[0]
             if pub1 == pub:
                 # it's the same user.
@@ -288,17 +335,21 @@ class Client:
     # do we know about the indicated key fingerprint?
     # return [ publickey, nickname ] or None
     def known_finger(self, finger):
+        if finger == self.finger():
+            return [ util.box(self.publickey()), self.nickname() ]
         key = "known1-" + self.finger() + util.hash(finger + self.masterrandom.hex())
         # XXX assert that we signed the k/v pair!
-        x = self.get(key)
+        x = self.get(key, self.nickname())
         return x
 
     # do we know about the indicated nickname?
     # return [ publickey, nickname ] or None
     def known_nickname(self, nickname):
+        if nickname == self.nickname():
+            return [ util.box(self.publickey()), self.nickname() ]
         key = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
         # XXX assert that we signed the k/v pair!
-        x = self.get(key)
+        x = self.get(key, self.nickname())
         return x
 
     # fetch and return full "known" list.
@@ -315,6 +366,8 @@ class Client:
 
 
 def tests():
+    cno = Client("client-test-no", ( "127.0.0.1", 10223 ))
+
     c = Client("client-test", ( "127.0.0.1", 10223 ))
 
     c.put("a", "aa")
@@ -323,13 +376,25 @@ def tests():
     c.put("a2", "aa2")
     c.put("a3", "aa3")
     c.put("b", "bb")
-    assert c.get("a1") == "aa1"
+    assert c.get("a1", c.nickname()) == "aa1"
+    assert c.get("a1", None) == "aa1"
 
-    z = c.range("a", "a2")
+    assert c.get("a", "wrongowner") == None
+    assert c.get("a", "client-test-no") == None
+    assert c.get("nothere", c.nickname()) == None
+    assert c.get("nothere", None) == None
+
+    z = c.range("a", "a2", c.nickname())
     # [ [ 'a1', 'aa1' ], [ 'a', 'aa' ] ]
     assert len(z) == 2
-    assert [ 'a1', 'aa1' ] in z
-    assert [ 'a', 'aa' ] in z
+    assert [ 'a1', 'aa1', 'client-test' ] in z
+    assert [ 'a', 'aa', 'client-test' ] in z
+
+    z = c.range("a", "a2", None)
+    assert len(z) == 2
+
+    z = c.range("a", "a2", "client-test-no")
+    assert len(z) == 0
 
 if __name__ == '__main__':
     tests()
