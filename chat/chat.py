@@ -12,13 +12,15 @@
 #   value = [ 'message', 'the message' ]
 #
 # closed announcement:
+#   needed so others know who should sign the participant list entries.
+#   anyone can cook up any roomID! and insert participant entries!
 #   key = 
 #   value = 
 # closed participant list entry:
-#   key = 
-#   value = 
+#   key = "participant"-ownerfinger-roomID-participantfinger
+#   value = [ participantfinger ]
 # closed message (one per recipient):
-#   key = roomid-tofingerprint-timestamp
+#   key = "message"-roomid-tofingerprint-timestamp
 #   value = 
 #
 

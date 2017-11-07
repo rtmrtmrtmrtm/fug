@@ -338,7 +338,6 @@ class Client:
         if finger == self.finger():
             return [ util.box(self.publickey()), self.nickname() ]
         key = "known1-" + self.finger() + util.hash(finger + self.masterrandom.hex())
-        # XXX assert that we signed the k/v pair!
         x = self.get(key, self.nickname())
         return x
 
@@ -348,7 +347,6 @@ class Client:
         if nickname == self.nickname():
             return [ util.box(self.publickey()), self.nickname() ]
         key = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
-        # XXX assert that we signed the k/v pair!
         x = self.get(key, self.nickname())
         return x
 
