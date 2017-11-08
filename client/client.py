@@ -37,10 +37,10 @@ masterlock = threading.Lock()
 class Client:
 
     # nickname is user's human-readable name for her/himself, e.g. "sally".
-    # hostport is server address, e.g. ( "127.0.0.1", 10223 )
-    def __init__(self, nickname, hostport):
+    def __init__(self, nickname):
         self.nickname_ = nickname
-        self.hostport = hostport
+
+        self.hostport = ( "fug.rtmrtm.org", 10223 )
 
         # XXX it's crazy to leave the master private key laying around.
         # ideally a separate agent process that would sign a certificate
@@ -105,7 +105,11 @@ class Client:
         myfinger = self.finger()
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(self.hostport)
+        try:
+            s.connect(self.hostport)
+        except:
+            sys.stderr.write("connect %s failed\n" % (self.hostport))
+            sys.exit(1)
         self.send_json(s, [ "put", k, [ v, signature.hex(), myfinger ] ])
         x = self.recv_json(s)
         s.close()
@@ -524,11 +528,11 @@ class Client:
 
 def tests():
     name1 = util.hex(Crypto.Random.new().read(32))[0:6]
-    c1 = Client(name1, ( "127.0.0.1", 10223 ))
+    c1 = Client(name1)
     name2 = util.hex(Crypto.Random.new().read(32))[0:6]
-    c2 = Client(name2, ( "127.0.0.1", 10223 ))
+    c2 = Client(name2)
     name3 = util.hex(Crypto.Random.new().read(32))[0:6]
-    c3 = Client(name3, ( "127.0.0.1", 10223 ))
+    c3 = Client(name3)
 
     # can I see my own puts?
     # type-fromfinger
@@ -576,8 +580,10 @@ def tests():
     # range() type-[unique1,unique2]-fromfinger
     a = c2.range("type2", frm=None, unique=[ "b", "c~" ])
     # a is [ [ key, value, nickname ], ... ]
+    assert "v4"+name1 not in [ x[1] for x in a ]
     assert "v5"+name1 in [ x[1] for x in a ]
     assert "v6"+name1 in [ x[1] for x in a ]
+    assert "v7"+name1 not in [ x[1] for x in a ]
 
     # XXX test sealing and to=
 

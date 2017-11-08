@@ -1,11 +1,11 @@
 #
-# chat nickname --new roomname
+# chat nickname --new
 # chat nickname --list
 # chat nickname --join
 #
 # announcement:
 #   key = ownerfingerprint-"room"-roomid
-#   value = [ roomname, roomid ]
+#   value = [ roomid ]
 # message:
 #   key = roomid-timestamp-fromfingerprint
 #   value = [ 'message', 'the message' ]
@@ -21,40 +21,35 @@ sys.path.append("../util")
 import util
 
 class Chat:
-    # server is e.g. ( "127.0.0.1", 10223 )
     # nickname is e.g. "fred".
-    def __init__(self, server, nickname):
-        self.server = server
+    def __init__(self, nickname):
         self.nickname = nickname
 
-    def open_poller(self):
-        c = client.Client(self.nickname, self.server)
+    def poller(self):
+        c = client.Client(self.nickname)
         ts1 = 0
         while True:
             ts2 = int(time.time())
-            rows = c.range(self.roomid + "-" + str(ts1),
-                           self.roomid + "-" + str(ts2),
-                           None)
+            k1 = self.roomid + "-" + str(ts1)
+            k2 = self.roomid + "-" + str(ts2)
+            rows = c.range("message", unique = [ k1, k2 ] )
             for row in rows:
-                # row is [ key, [ 'message', txt ], nickname ]
-                key = row[0]
-                value = row[1]
+                # row is [ key, [ timestamp, txt ], nickname ]
+                timestamp = int(row[1][0])
+                txt = row[1][1]
                 nickname = row[2]
-                [ ty, txt ] = value
-                [ roomid, timestamp, fingerjunk ] = key.split("-")
-                timestamp = int(timestamp)
-                if timestamp > ts1 and ty == "message":
+                if timestamp > ts1:
                     ts1 = timestamp
                     if nickname != c.nickname():
                         print("%s: %s" % (nickname, txt))
             time.sleep(1)
 
-    def go_open(self):
-        th = threading.Thread(target=lambda : self.open_poller())
+    def go(self):
+        th = threading.Thread(target=lambda : self.poller())
         th.daemon = True
         th.start()
         
-        c = client.Client(self.nickname, self.server)
+        c = client.Client(self.nickname)
         while True:
             sys.stdout.write("%s> " % (self.nickname))
             sys.stdout.flush()
@@ -64,67 +59,64 @@ class Chat:
             txt = txt[0:-1]
 
             if len(txt) > 0:
-                msgid = "%s-%d-%s" % (self.roomid, int(time.time()), c.finger())
-                c.put(msgid, [ 'message', txt ])
+                ts = str(int(time.time()))
+                msgid = self.roomid + "-" + ts
+                c.put([ ts, txt ],
+                      'message',
+                      unique=msgid)
+                      
 
-    # create a public chat room.
-    # the only point of inserting an announcement into the DB
-    # is so that friends can search for it under our ownerfingerprint.
-    def make_open(self, roomname):
-        c = client.Client(self.nickname, self.server)
+    # create a public chat room announcement.
+    # the point is so that friends can get a list of chatrooms with --list.
+    def make(self):
+        c = client.Client(self.nickname)
         self.roomid = util.randhex(16)
-        key = c.finger() + "-room-" + self.roomid
-        value = [ roomname, self.roomid ]
-        c.put(key, value)
-        print("Created chatroom ID %s" % (self.roomid))
+        value = [ self.roomid ]
+        c.put(value, "openchat", unique=self.roomid)
+        print("Created roomID %s" % (self.roomid))
+        print("Others should run python3 openchat.py <username> --join %s" % (self.roomid))
 
     # join an existing group.
-    # for now, only open groups.
     def join(self, roomid):
         self.roomid = roomid
-        self.go_open()
+        self.go()
 
-    # return a list of [ roomname, roomid ]
+    # return a list of [ roomid ]
     # looks at my "known" list for people I know,
     # and then looks for rooms they have created.
     def make_list(self):
-        c = client.Client(self.nickname, self.server)
+        c = client.Client(self.nickname)
 
         ret = [ ]
         knowns = c.known_list()
         for e in knowns:
             # e is [ publickey, nickname ]
-            othername = e[1]
-            otherpub = util.unbox(e[0])
-            other_fingerprint = util.fingerprint(otherpub)
-            aa = c.range(other_fingerprint + "-room-",
-                         other_fingerprint + "-room-~",
-                         othername)
+            aa = c.range("openchat",
+                         frm=e[1],
+                         unique=[" ", "~"])
             for ee in aa:
                 ret.append( ee[1] )
         
         return ret
 
 if __name__ == '__main__':
-    server = ( "127.0.0.1", 10223 )
-
-    if len(sys.argv) == 4 and sys.argv[2] == "--new":
+    if len(sys.argv) == 3 and sys.argv[2] == "--new":
         nickname = sys.argv[1]
-        ch = Chat(server, nickname)
-        ch.make_open(sys.argv[3])
-        ch.go_open()
+        ch = Chat(nickname)
+        ch.make()
+        ch.go()
     elif len(sys.argv) == 4 and sys.argv[2] == "--join":
         nickname = sys.argv[1]
-        ch = Chat(server, nickname)
+        ch = Chat(nickname)
         ch.join(sys.argv[3])
     elif len(sys.argv) == 3 and sys.argv[2] == "--list":
         nickname = sys.argv[1]
-        ch = Chat(server, nickname)
+        ch = Chat(nickname)
         ll = ch.make_list()
         for e in ll:
             print(e)
     else:
-        sys.stderr.write("Usage: chat nickname --new roomname\n")
+        sys.stderr.write("Usage: chat nickname --new\n")
         sys.stderr.write("       chat nickname --list\n")
-        sys.stderr.write("       chat nickname --join roomid\n")
+        sys.stderr.write("       chat nickname --join roomID\n")
         sys.exit(1)

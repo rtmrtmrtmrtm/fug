@@ -17,10 +17,8 @@ sys.path.append("../util")
 import util
 
 class Link:
-    # server is e.g. ( "127.0.0.1", 10223 )
     # nickname is my name for myself, like "sally".
-    def __init__(self, server, nickname):
-        self.server = server
+    def __init__(self, nickname):
         self.nickname = nickname
 
     # generate the string to read to the other person over
@@ -36,7 +34,7 @@ class Link:
 
     # we want to initiate a link to someone and call them othername.
     def gofirst(self, othername):
-        c = client.Client(self.nickname, self.server)
+        c = client.Client(self.nickname)
         phrase = self.make_phrase()
 
         sys.stdout.write("Enter a personal message for %s: " % (othername))
@@ -89,7 +87,7 @@ class Link:
 
     # we want to respond to a link from someone and call them othername.
     def gosecond(self, othername, phrase):
-        c = client.Client(self.nickname, self.server)
+        c = client.Client(self.nickname)
 
         # othername already inserted info under phrase.
         value = c.get(phrase)
@@ -130,7 +128,7 @@ class Link:
         c.save_known(othername, xpub)
 
     def list(self):
-        c = client.Client(self.nickname, self.server)
+        c = client.Client(self.nickname)
         knowns = c.known_list()
         for e in knowns:
             # e is [ publickey, name ]
@@ -138,9 +136,8 @@ class Link:
 
 if __name__ == '__main__':
     phrase = None
-    server = ( "127.0.0.1", 10223 )
     if len(sys.argv) == 3 and sys.argv[2] == "--list":
-        ch = Link(server, sys.argv[1])
+        ch = Link(sys.argv[1])
         ch.list()
         sys.exit(0)
     elif len(sys.argv) == 3:
@@ -155,7 +152,7 @@ if __name__ == '__main__':
         sys.stderr.write("       link nickname othername phrase\n")
         sys.stderr.write("       link nickname --list\n")
         sys.exit(1)
-    ch = Link(server, nickname)
+    ch = Link(nickname)
     if phrase == None:
         ch.gofirst(othername)
     else:
