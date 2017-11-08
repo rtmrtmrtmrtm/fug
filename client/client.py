@@ -105,11 +105,7 @@ class Client:
         myfinger = self.finger()
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            s.connect(self.hostport)
-        except:
-            sys.stderr.write("connect %s failed\n" % (self.hostport))
-            sys.exit(1)
+        s.connect(self.hostport)
         self.send_json(s, [ "put", k, [ v, signature.hex(), myfinger ] ])
         x = self.recv_json(s)
         s.close()

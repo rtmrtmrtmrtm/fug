@@ -1,4 +1,4 @@
-The goal is an easy-to-use distributed storage library to build
+The goal is an easy-to-use distributed storage library to help build
 multi-user applications. Ideally it would be simple enough so that
 readers of e.g. Briggs' Python for Kids could build multi-user chat
 and game programs.
