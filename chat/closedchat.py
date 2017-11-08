@@ -1,26 +1,18 @@
 #
-# chat nickname --open roomname
-# chat nickname --closed roomname
+# chat nickname --new roomname
 # chat nickname --list
 # chat nickname --join
 #
-# open announcement:
-#   key = ownerfingerprint-"room"-roomid
-#   value = [ roomname, roomid ]
-# open message:
-#   key = roomid-timestamp-fromfingerprint
-#   value = [ 'message', 'the message' ]
-#
-# closed announcement:
+# announcement:
 #   needed so others know who should sign the participant list entries.
 #   anyone can cook up any roomID! and insert participant entries!
-#   key = 
+#   key = "room"-ownerfinger-roomID
 #   value = 
 # closed participant list entry:
 #   key = "participant"-ownerfinger-roomID-participantfinger
 #   value = [ participantfinger ]
 # closed message (one per recipient):
-#   key = "message"-roomid-tofingerprint-timestamp
+#   key = "message"-roomid-fromfingerprint-tofingerprint-timestamp
 #   value = 
 #
 
@@ -137,8 +129,7 @@ if __name__ == '__main__':
         for e in ll:
             print(e)
     else:
-        sys.stderr.write("Usage: chat nickname --open roomname\n")
-        sys.stderr.write("       chat nickname --closed roomname\n")
+        sys.stderr.write("Usage: chat nickname --new roomname\n")
         sys.stderr.write("       chat nickname --list\n")
         sys.stderr.write("       chat nickname --join roomid\n")
         sys.exit(1)

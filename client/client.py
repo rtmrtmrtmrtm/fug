@@ -51,10 +51,49 @@ class Client:
     def nickname(self):
         return self.nickname_
 
-    # XXX should take an argument indicating who (if anyone)
-    # we want to be able to read the k/v -- i.e. how to
-    # seal it.
-    def put(self, k, v):
+    # to be called by applications.
+    # does multiple lowput()s with various sub-key orders.
+    # to and frm are nicknames.
+    # XXX use something less ambiguous and spoofable than -,
+    #     so that client get() and servers can be sure they
+    #     are validating the signature of the fromfinger in
+    #     the key, to prevent squatting.
+    # XXX seal for to's eyes only.
+    def put(self, v, type, to=None, unique=None):
+        if to != None:
+            tofinger = self.nickname2finger(to)
+        else:
+            tofinger = None
+
+        # type-fromfinger-[tofinger]-[unique]
+        # for e.g. my own "known" rows
+        k = type + "-" + self.finger()
+        if tofinger != None:
+            k += "-" + tofinger
+        if unique != None:
+            k += "-" + unique
+        self.lowput(k, v)
+
+        # type-unique-fromfinger-[tofinger]
+        # for e.g. openchat messages, ordered by unique=timestamp.
+        if unique != None:
+            k = type + "-" + unique + "-" + self.finger()
+            if tofinger != None:
+                k += "-" + tofinger
+            self.lowput(k, v)
+
+        # type-tofinger-fromfinger-[unique]
+        # for e.g. closedchat messages directed at a specific user.
+        # the optional stuff has to be at the end...
+        if tofinger != None:
+            k = type + "-" + tofinger
+            if unique != None:
+                k += "-" + unique
+            k += "-" + self.finger()
+            self.lowput(k, v)
+
+    # internal put of specific key.
+    def lowput(self, k, v):
         # generate signature over json of k and v,
         # using master private key and RSASSA-PSS.
         kv = json.dumps([ k, v ])
@@ -73,7 +112,7 @@ class Client:
 
     # low-level get; does not check signature.
     # returns None, or [ value, signature, fingerprint ]
-    def lowget(self, k):
+    def lowlowget(self, k):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "get", k ])
@@ -86,8 +125,11 @@ class Client:
     # key it claims to be signed by.
     # if signer != None, it's a local nickname and the record
     # must have been signed by that nickname.
-    def get(self, k, signer):
-        v = self.lowget(k)
+    # XXX check that every k/v is signed by the fromfinger in
+    #     the key, since now every key must have a fromfinger
+    #     to encourage uniqueness and prevent squatting.
+    def lowget(self, k, signer):
+        v = self.lowlowget(k)
         if v == None:
             # no DB entry for k.
             return None
@@ -106,13 +148,68 @@ class Client:
 
         return v[0]
 
+    # dual of put().
+    # try various specific low-level keys.
+    # to be used only when caller is using the same
+    # sub-key info that the corresponding put() used.
+    # to and frm are nicknames.
+    # XXX can there be more than one matching result?
+    # XXX unseal if needed.
+    # XXX to has to be me! otherwise can't unseal.
+    def get(self, type, frm=None, to=None, unique=None):
+        if frm != None:
+            fromfinger = self.nickname2finger(frm)
+        else:
+            fromfinger = None
+
+        if to != None:
+            tofinger = self.nickname2finger(to)
+        else:
+            tofinger = None
+
+        # type-fromfinger-[tofinger]-[unique]
+        # for e.g. my own "known" rows
+        if fromfinger != None:
+            k = type + "-" + fromfinger
+            if tofinger != None:
+                k += "-" + tofinger
+            if unique != None:
+                k += "-" + unique
+            v = self.lowget(k, frm)
+            return v
+
+        # type-unique-fromfinger-[tofinger]
+        # for e.g. openchat messages, ordered by unique=timestamp.
+        if unique != None and fromfinger != None:
+            k = type + "-" + unique + "-" + fromfinger
+            if tofinger != None:
+                k += "-" + tofinger
+            v = self.lowget(k, frm)
+            return v
+
+        # type-tofinger-fromfinger-[unique]
+        # for e.g. closedchat messages directed at a specific user.
+        # the optional stuff has to be at the end...
+        if tofinger != None and fromfinger != None:
+            k = type + "-" + tofinger + "-" + fromfinger
+            if unique != None:
+                k += "-" + unique
+            v = self.lowget(k, frm)
+            return v
+
+        sys.stderr.write("get() can't guess key; %s %s %s %s\n" % (type,
+                                                                   frm,
+                                                                   to,
+                                                                   unique))
+        assert False
+
     # check the signature on a k/v fetched from DB.
     # v is as returned by lowget.
     def check(self, k, v):
         finger = v[2]
 
         # retrieve the fingerprint's public key from the DB.
-        pkv = self.lowget("finger-" + finger)
+        pkv = self.lowlowget("finger-" + finger)
         if pkv == None:
             # no entry for the fingerprint,
             # so pretend the DB entry is entirely missing.
@@ -256,13 +353,15 @@ class Client:
         # type is bytes
         self.masterrandom = rrr
 
-        self.put("finger-" + self.finger(), [ self.nickname(), util.box(self.publickey()) ] )
+        self.put([ self.nickname(), util.box(self.publickey()) ],
+                 "finger")
 
-    # return the master public key.
+    # return our master public key,
+    # as a Crypto _RSAobj.
     def publickey(self):
         return self.masterkey.publickey()
 
-    # fingerprint of my master public key.
+    # fingerprint of our master public key.
     # returns a hex str.
     def finger(self):
         return util.fingerprint(self.publickey())
@@ -277,18 +376,31 @@ class Client:
         x = self.known_finger(finger)
         if x != None:
             return x[1]
-        x = self.get("finger-" + finger, None)
-        if x == None:
+        k = "finger-" + finger
+        v = self.lowlowget(k)
+        if v == None:
             return None
         else:
-            # x is [ nickname, public key ]
-            nickname = x[0]
-            nickname = self.save_known(nickname, x[1])
+            # v is [ [ nickname, boxed public key ], signature, fingerprint ]
+            if self.check(k, v) == False:
+                return None
+            nickname = v[0][0]
+            nickname = self.save_known(nickname, v[0][1])
             return nickname
+
+    # given a local nickname that's already been established,
+    # return its fingerprint.
+    def nickname2finger(self, nickname):
+        nnv = self.known_nickname(nickname)
+        assert nnv != None
+        [ pub, junk ] = nnv
+        finger = util.fingerprint(util.unbox(pub))
+        return finger
 
     # save a nickname/fingerprint relationship that we've learned,
     # so that in future we always use the same nickname for
     # the corresponding public key.
+    # pub should be boxed.
     # XXX should seal these so only inserting user can read them.
     # returns the nickname, possibly different.
     def save_known(self, nickname, pub):
@@ -324,11 +436,15 @@ class Client:
 
         known_value = [ pub, nickname ]
 
-        kk1 = "known1-" + self.finger() + util.hash(other_fingerprint + self.masterrandom.hex())
-        self.put(kk1, known_value)
+        h1 = util.hash(other_fingerprint + self.masterrandom.hex())
+        self.put(known_value,
+                 "known1",
+                 unique=h1)
 
-        kk2 = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
-        self.put(kk2, known_value)
+        h2 = util.hash(nickname + self.masterrandom.hex())
+        self.put(known_value,
+                 "known2",
+                 unique=h2)
 
         return nickname
 
@@ -337,21 +453,21 @@ class Client:
     def known_finger(self, finger):
         if finger == self.finger():
             return [ util.box(self.publickey()), self.nickname() ]
-        key = "known1-" + self.finger() + util.hash(finger + self.masterrandom.hex())
-        x = self.get(key, self.nickname())
+        h = util.hash(finger + self.masterrandom.hex())
+        x = self.get("known1", frm=self.nickname(), unique=h)
         return x
 
     # do we know about the indicated nickname?
-    # return [ publickey, nickname ] or None
+    # return [ boxedpublickey, nickname ] or None
     def known_nickname(self, nickname):
         if nickname == self.nickname():
             return [ util.box(self.publickey()), self.nickname() ]
-        key = "known2-" + self.finger() + util.hash(nickname + self.masterrandom.hex())
-        x = self.get(key, self.nickname())
+        h = util.hash(nickname + self.masterrandom.hex())
+        x = self.get("known2", frm=self.nickname(), unique=h)
         return x
 
     # fetch and return full "known" list.
-    # each entry is [ publickey, nickname ]
+    # each entry is [ boxedpublickey, nickname ]
     def known_list(self):
         ret = [ ]
         rows = self.range("known1-" + self.finger(),
@@ -364,9 +480,38 @@ class Client:
 
 
 def tests():
-    cno = Client("client-test-no", ( "127.0.0.1", 10223 ))
+    name1 = util.hex(Crypto.Random.new().read(32))[0:6]
+    c1 = Client(name1, ( "127.0.0.1", 10223 ))
+    name2 = util.hex(Crypto.Random.new().read(32))[0:6]
+    c2 = Client(name2, ( "127.0.0.1", 10223 ))
+    name3 = util.hex(Crypto.Random.new().read(32))[0:6]
+    c3 = Client(name3, ( "127.0.0.1", 10223 ))
 
-    c = Client("client-test", ( "127.0.0.1", 10223 ))
+    # can I see my own puts?
+    # type-fromfinger
+    c1.put("v1", "type1")
+    assert c1.get("type1", frm=name1) == "v1"
+    # type-fromfinger-unique
+    c1.put("v2", "type1", unique="uuu1")
+    assert c1.get("type1", frm=name1, unique="uuu1") == "v2"
+
+    # make c1 and c2 know about each other by nickname.
+    c1.save_known(name2, util.box(c2.publickey()))
+    c2.save_known(name1, util.box(c1.publickey()))
+
+    # check that c1 and c2 know about each other.
+    assert c1.finger2nickname(c1.finger()) == c1.nickname()
+    assert c1.finger2nickname(c2.finger()) == c2.nickname()
+    assert c2.finger2nickname(c1.finger()) == c1.nickname()
+    assert c2.finger2nickname(c2.finger()) == c2.nickname()
+    assert c1.nickname2finger(c1.nickname()) == c1.finger()
+    assert c1.nickname2finger(c2.nickname()) == c2.finger()
+    assert c2.nickname2finger(c1.nickname()) == c1.finger()
+    assert c2.nickname2finger(c2.nickname()) == c2.finger()
+
+    # can c2 see c1's puts?
+    assert c2.get("type1", frm=name1) == "v1"
+    assert c2.get("type1", frm=name1, unique="uuu1") == "v2"
 
     c.put("a", "aa")
     c.put("a1", "old")

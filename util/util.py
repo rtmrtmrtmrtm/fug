@@ -38,6 +38,9 @@ def unbox(txt):
     pub2 = Crypto.PublicKey.RSA.importKey(pub1)
     return pub2
 
+def hex(b):
+    return b.hex()
+
 def unhex(s):
     return binascii.unhexlify(s)
 

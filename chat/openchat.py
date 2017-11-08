@@ -1,27 +1,14 @@
 #
-# chat nickname --open roomname
-# chat nickname --closed roomname
+# chat nickname --new roomname
 # chat nickname --list
 # chat nickname --join
 #
-# open announcement:
+# announcement:
 #   key = ownerfingerprint-"room"-roomid
 #   value = [ roomname, roomid ]
-# open message:
+# message:
 #   key = roomid-timestamp-fromfingerprint
 #   value = [ 'message', 'the message' ]
-#
-# closed announcement:
-#   needed so others know who should sign the participant list entries.
-#   anyone can cook up any roomID! and insert participant entries!
-#   key = 
-#   value = 
-# closed participant list entry:
-#   key = "participant"-ownerfinger-roomID-participantfinger
-#   value = [ participantfinger ]
-# closed message (one per recipient):
-#   key = "message"-roomid-tofingerprint-timestamp
-#   value = 
 #
 
 import sys
@@ -121,7 +108,7 @@ class Chat:
 if __name__ == '__main__':
     server = ( "127.0.0.1", 10223 )
 
-    if len(sys.argv) == 4 and sys.argv[2] == "--open":
+    if len(sys.argv) == 4 and sys.argv[2] == "--new":
         nickname = sys.argv[1]
         ch = Chat(server, nickname)
         ch.make_open(sys.argv[3])
@@ -137,8 +124,7 @@ if __name__ == '__main__':
         for e in ll:
             print(e)
     else:
-        sys.stderr.write("Usage: chat nickname --open roomname\n")
-        sys.stderr.write("       chat nickname --closed roomname\n")
+        sys.stderr.write("Usage: chat nickname --new roomname\n")
         sys.stderr.write("       chat nickname --list\n")
         sys.stderr.write("       chat nickname --join roomid\n")
         sys.exit(1)
