@@ -240,7 +240,7 @@ class Client:
     # each nickname is the local nickname for the
     # public key that signed the row.
     # if signer!=None, only return lines signed by that nickname.
-    def range(self, key1, key2, signer):
+    def lowrange(self, key1, key2, signer):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "range", key1, key2 ])
@@ -255,6 +255,51 @@ class Client:
                 if signer == None or signer == nn:
                     x1.append( [ xx[0], xx[1][0], nn ] )
         return x1
+
+    # only some kinds of range scans are supported,
+    # implied by which argument is a two-element list.
+    # type-fromfinger-[unique1,unique2] (for e.g. "known" rows).
+    # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
+    # list of [ key, value, nickname ]
+    # how to scan a type-fromfinger-unique or type-unique-fromfinger
+    #   collection is tricky. put() always populates both if it can.
+    #   range() decides which to scan based on whether frm is set;
+    #   if it is, it only looks at type-fromfinger-[u1,u2].
+    # XXX check that fromfinger in resulting keys signed each row.
+    # XXX unseal.
+    # XXX the returned keys won't be meaningful, should translate
+    #     back to argument scheme.
+    def range(self, type, frm=None, to=None, unique=None):
+        if frm != None:
+            fromfinger = self.nickname2finger(frm)
+        else:
+            fromfinger = None
+
+        if to != None:
+            tofinger = self.nickname2finger(to)
+        else:
+            tofinger = None
+
+        # type-fromfinger-[unique1,unique2] (for e.g. "known" rows).
+        if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
+            k1 = type + "-" + fromfinger + "-" + unique[0]
+            k2 = type + "-" + fromfinger + "-" + unique[1]
+            a = self.lowrange(k1, k2, frm)
+            return a
+
+        # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
+        if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
+            k1 = type + "-" + unique[0]
+            k2 = type + "-" + unique[1]
+            a = self.lowrange(k1, k2, None)
+            # XXX check that each is signed by its fromfinger.
+            return a
+
+        sys.stderr.write("range() can't guess scheme; %s %s %s %s\n" % (type,
+                                                                        frm,
+                                                                        to,
+                                                                        unique))
+        assert False
 
     def send_json(self, s, obj):
         txt = bytes(json.dumps(obj), 'utf-8')
@@ -449,7 +494,7 @@ class Client:
         return nickname
 
     # do we know about the indicated key fingerprint?
-    # return [ publickey, nickname ] or None
+    # return [ boxedpublickey, nickname ] or None
     def known_finger(self, finger):
         if finger == self.finger():
             return [ util.box(self.publickey()), self.nickname() ]
@@ -470,9 +515,7 @@ class Client:
     # each entry is [ boxedpublickey, nickname ]
     def known_list(self):
         ret = [ ]
-        rows = self.range("known1-" + self.finger(),
-                          "known1-" + self.finger() + "~",
-                          self.nickname())
+        rows = self.range("known1", frm=self.nickname(), unique=[" ", "~"])
         for row in rows:
             # row is [ key, [ publickey, nickname ] ]
             ret.append(row[1])
@@ -492,8 +535,10 @@ def tests():
     c1.put("v1", "type1")
     assert c1.get("type1", frm=name1) == "v1"
     # type-fromfinger-unique
-    c1.put("v2", "type1", unique="uuu1")
-    assert c1.get("type1", frm=name1, unique="uuu1") == "v2"
+    c1.put("v2", "type1", unique="uuu2")
+    c1.put("v3", "type1", unique="uuu3")
+    assert c1.get("type1", frm=name1, unique="uuu2") == "v2"
+    assert c1.get("type1", frm=name1, unique="uuu3") == "v3"
 
     # make c1 and c2 know about each other by nickname.
     c1.save_known(name2, util.box(c2.publickey()))
@@ -511,33 +556,31 @@ def tests():
 
     # can c2 see c1's puts?
     assert c2.get("type1", frm=name1) == "v1"
-    assert c2.get("type1", frm=name1, unique="uuu1") == "v2"
+    assert c2.get("type1", frm=name1, unique="uuu2") == "v2"
+    assert c2.get("type1", frm=name1, unique="uuu3") == "v3"
 
-    c.put("a", "aa")
-    c.put("a1", "old")
-    c.put("a1", "aa1")
-    c.put("a2", "aa2")
-    c.put("a3", "aa3")
-    c.put("b", "bb")
-    assert c.get("a1", c.nickname()) == "aa1"
-    assert c.get("a1", None) == "aa1"
+    # implicitly tests range().
+    kn1 = c1.known_list()
+    # kn1 is [ [ public, nickname ], ... ]
+    assert len(kn1) == 1
+    assert c2.nickname() in [ x[1] for x in kn1 ]
 
-    assert c.get("a", "wrongowner") == None
-    assert c.get("a", "client-test-no") == None
-    assert c.get("nothere", c.nickname()) == None
-    assert c.get("nothere", None) == None
+    # range() type-fromfinger-[unique1,unique2]
+    c1.put("v4"+name1, "type2", unique="aaa")
+    c1.put("v5"+name1, "type2", unique="bbb")
+    c1.put("v6"+name1, "type2", unique="ccc")
+    c1.put("v7"+name1, "type2", unique="ddd")
+    assert len(c1.range("type2", frm=c1.nickname(), unique=[ "b", "c~" ])) == 2
+    assert len(c2.range("type2", frm=c1.nickname(), unique=[ "b", "c~" ])) == 2
 
-    z = c.range("a", "a2", c.nickname())
-    # [ [ 'a1', 'aa1' ], [ 'a', 'aa' ] ]
-    assert len(z) == 2
-    assert [ 'a1', 'aa1', 'client-test' ] in z
-    assert [ 'a', 'aa', 'client-test' ] in z
+    # range() type-[unique1,unique2]-fromfinger
+    a = c2.range("type2", frm=None, unique=[ "b", "c~" ])
+    # a is [ [ key, value, nickname ], ... ]
+    assert "v5"+name1 in [ x[1] for x in a ]
+    assert "v6"+name1 in [ x[1] for x in a ]
 
-    z = c.range("a", "a2", None)
-    assert len(z) == 2
+    # XXX test sealing and to=
 
-    z = c.range("a", "a2", "client-test-no")
-    assert len(z) == 0
 
 if __name__ == '__main__':
     tests()
