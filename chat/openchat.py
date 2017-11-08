@@ -4,11 +4,11 @@
 # chat nickname --join
 #
 # announcement:
-#   key = ownerfingerprint-"room"-roomid
-#   value = [ roomid ]
+#   key = type=openchat, unique=roomID
+#   value = [ roomID ]
 # message:
-#   key = roomid-timestamp-fromfingerprint
-#   value = [ 'message', 'the message' ]
+#   key = type=message, unique=roomid-timestamp
+#   value = [ timestamp, text ]
 #
 
 import sys
@@ -21,10 +21,11 @@ sys.path.append("../util")
 import util
 
 class Chat:
-    # nickname is e.g. "fred".
+    # nickname is my nickname for myself, e.g. "rtm".
     def __init__(self, nickname):
         self.nickname = nickname
 
+    # ask the DB service for new messages, once per second.
     def poller(self):
         c = client.Client(self.nickname)
         ts1 = 0
@@ -44,6 +45,7 @@ class Chat:
                         print("%s: %s" % (nickname, txt))
             time.sleep(1)
 
+    # start a poller(), and read messages from the keyboard.
     def go(self):
         th = threading.Thread(target=lambda : self.poller())
         th.daemon = True

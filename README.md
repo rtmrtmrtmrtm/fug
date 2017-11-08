@@ -25,7 +25,7 @@ As yet there's no encryption for privacy.
 
 The main application is multi-user chat. To create a new chatroom:
 
-  cd fug/chat
+  cd fug/chat ;
   python3 openchat.py user1 --new
 
 The above will print a roomID. A user can join this chat with:
