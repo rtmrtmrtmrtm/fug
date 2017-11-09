@@ -204,7 +204,9 @@ class Client:
         assert False
 
     # check the signature on a k/v fetched from DB.
-    # v is as returned by lowget.
+    # v is as returned by lowlowget: [ value, signature, fingerprint ]
+    # XXX check that the fingerprint matches the relevant
+    #     field in the key.
     def check(self, k, v):
         finger = v[2]
 

@@ -36,12 +36,19 @@ class Chat:
             rows = c.range("message", unique = [ k1, k2 ] )
             for row in rows:
                 # row is [ key, [ timestamp, txt ], nickname ]
+                # the nickname is cryptographically bound to
+                # the key that signed the message, so that
+                # we'll always print the same nickname for the
+                # same signer, and always print different nicknames
+                # for different signers. that is the sense in
+                # which this application is secure.
                 timestamp = int(row[1][0])
                 txt = row[1][1]
                 nickname = row[2]
                 if timestamp > ts1:
                     ts1 = timestamp
                     if nickname != c.nickname():
+                        # only print messages that are not from us.
                         print("%s: %s" % (nickname, txt))
             time.sleep(1)
 
