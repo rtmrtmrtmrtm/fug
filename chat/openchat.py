@@ -35,21 +35,20 @@ class Chat:
             k2 = self.roomid + "-" + str(ts2)
             rows = c.range("message", unique = [ k1, k2 ] )
             for row in rows:
-                # row is [ key, [ timestamp, txt ], nickname ]
+                # row.value is [ timestamp, txt ]
                 # the nickname is cryptographically bound to
                 # the key that signed the message, so that
                 # we'll always print the same nickname for the
                 # same signer, and always print different nicknames
                 # for different signers. that is the sense in
                 # which this application is secure.
-                timestamp = int(row[1][0])
-                txt = row[1][1]
-                nickname = row[2]
+                timestamp = int(row.value[0])
+                txt = row.value[1]
                 if timestamp > ts1:
                     ts1 = timestamp
-                    if nickname != c.nickname():
+                    if row.nickname != c.nickname():
                         # only print messages that are not from us.
-                        print("%s: %s" % (nickname, txt))
+                        print("%s: %s" % (row.nickname, txt))
             time.sleep(1)
 
     # start a poller(), and read messages from the keyboard.
@@ -104,7 +103,7 @@ class Chat:
                          frm=e[1],
                          unique=[" ", "~"])
             for ee in aa:
-                ret.append( ee[1] )
+                ret.append( ee.value )
         
         return ret
 

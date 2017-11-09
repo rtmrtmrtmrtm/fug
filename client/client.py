@@ -34,6 +34,16 @@ import util
 
 masterlock = threading.Lock()
 
+# one row from the DB; get() returns one of these,
+# and range() returns an array of them.
+class Row:
+    def __init__(self, value, nickname, key_type, key_to, key_unique):
+        self.value = value
+        self.nickname = nickname # who inserted it
+        self.key_type = key_type # the put() argument
+        self.key_to = key_to     # a nickname, the put(to=) argument
+        self.key_unique = key_unique # the put(unique=) argument
+
 class Client:
 
     # nickname is user's human-readable name for her/himself, e.g. "sally".
@@ -153,6 +163,7 @@ class Client:
     # to be used only when caller is using the same
     # sub-key info that the corresponding put() used.
     # to and frm are nicknames.
+    # returns value.
     # XXX can there be more than one matching result?
     # XXX unseal if needed.
     # XXX to has to be me! otherwise can't unseal.
@@ -238,11 +249,11 @@ class Client:
 
         return True
 
-    # list of [ key, value, nickname ]
-    # each nickname is the local nickname for the
-    # public key that signed the row.
+    # returns list of Row.
     # if signer!=None, only return lines signed by that nickname.
-    def lowrange(self, key1, key2, signer):
+    # *_col (if not None) say which key columns hold various things,
+    # used to create a Row.
+    def lowrange(self, key1, key2, signer, type_col, to_col, unique_col):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "range", key1, key2 ])
@@ -253,16 +264,34 @@ class Client:
         for xx in x:
             # xx is [ key, [ value, signature, fingerprint ] ]
             if self.check(xx[0], xx[1]):
-                nn = self.finger2nickname(xx[1][2])
-                if signer == None or signer == nn:
-                    x1.append( [ xx[0], xx[1][0], nn ] )
+                nickname = self.finger2nickname(xx[1][2])
+                if signer == None or signer == nickname:
+                    key_type = None
+                    key_to = None
+                    key_unique = None
+                    keyvec = xx[0].split('-') # XXX spoofable!
+                    if type_col != None:
+                        key_type = keyvec[type_col]
+                    if to_col != None:
+                        key_to = keyvec[to_col]
+                    if unique_col != None:
+                        key_unique = keyvec[unique_col]
+                    row = Row(xx[1][0],
+                              nickname,
+                              key_type,
+                              key_to,
+                              key_unique)
+                    x1.append(row)
         return x1
 
     # only some kinds of range scans are supported,
     # implied by which argument is a two-element list.
     # type-fromfinger-[unique1,unique2] (for e.g. "known" rows).
     # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
-    # list of [ key, value, nickname ]
+    #
+    # returns a list of Row objects, each with:
+    #   .value, .nickname, .key_type, .key_to, .key_unique
+    #
     # how to scan a type-fromfinger-unique or type-unique-fromfinger
     #   collection is tricky. put() always populates both if it can.
     #   range() decides which to scan based on whether frm is set;
@@ -286,14 +315,14 @@ class Client:
         if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
             k1 = type + "-" + fromfinger + "-" + unique[0]
             k2 = type + "-" + fromfinger + "-" + unique[1]
-            a = self.lowrange(k1, k2, frm)
+            a = self.lowrange(k1, k2, frm, 0, None, 2)
             return a
 
         # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
         if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
             k1 = type + "-" + unique[0]
             k2 = type + "-" + unique[1]
-            a = self.lowrange(k1, k2, None)
+            a = self.lowrange(k1, k2, None, 0, None, 1)
             # XXX check that each is signed by its fromfinger.
             return a
 
@@ -519,8 +548,8 @@ class Client:
         ret = [ ]
         rows = self.range("known1", frm=self.nickname(), unique=[" ", "~"])
         for row in rows:
-            # row is [ key, [ publickey, nickname ] ]
-            ret.append(row[1])
+            # row.value is [ boxedpublickey, nickname ]
+            ret.append( row.value )
         return ret
 
 
@@ -577,14 +606,12 @@ def tests():
 
     # range() type-[unique1,unique2]-fromfinger
     a = c2.range("type2", frm=None, unique=[ "b", "c~" ])
-    # a is [ [ key, value, nickname ], ... ]
-    assert "v4"+name1 not in [ x[1] for x in a ]
-    assert "v5"+name1 in [ x[1] for x in a ]
-    assert "v6"+name1 in [ x[1] for x in a ]
-    assert "v7"+name1 not in [ x[1] for x in a ]
+    assert "v4"+name1 not in [ x.value for x in a ]
+    assert "v5"+name1 in [ x.value for x in a ]
+    assert "v6"+name1 in [ x.value for x in a ]
+    assert "v7"+name1 not in [ x.value for x in a ]
 
     # XXX test sealing and to=
-
 
 if __name__ == '__main__':
     tests()
