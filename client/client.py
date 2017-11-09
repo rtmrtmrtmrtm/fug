@@ -130,7 +130,7 @@ class Client:
         s.close()
         return x
 
-    # None, or a value.
+    # returns a Row (just value and nickname), or None.
     # checks that the key+value is signed by the public
     # key it claims to be signed by.
     # if signer != None, it's a local nickname and the record
@@ -150,20 +150,21 @@ class Client:
             # signature did not verify at all.
             return None
 
+        nickname = self.finger2nickname(v[2])
         if signer != None:
-            nn = self.finger2nickname(v[2])
-            if nn != signer:
+            if nickname != signer:
                 # was not signed by signer.
                 return None
 
-        return v[0]
+        row = Row(v[0], nickname, None, None, None)
+        return row
 
     # dual of put().
     # try various specific low-level keys.
     # to be used only when caller is using the same
     # sub-key info that the corresponding put() used.
     # to and frm are nicknames.
-    # returns value.
+    # returns a Row, so the caller can learn about key and nickname.
     # XXX can there be more than one matching result?
     # XXX unseal if needed.
     # XXX to has to be me! otherwise can't unseal.
@@ -186,8 +187,12 @@ class Client:
                 k += "-" + tofinger
             if unique != None:
                 k += "-" + unique
-            v = self.lowget(k, frm)
-            return v
+            row = self.lowget(k, frm)
+            if row != None:
+                row.key_type = type
+                row.key_unique = unique
+                row.key_to = to
+            return row
 
         # type-unique-fromfinger-[tofinger]
         # for e.g. openchat messages, ordered by unique=timestamp.
@@ -195,8 +200,12 @@ class Client:
             k = type + "-" + unique + "-" + fromfinger
             if tofinger != None:
                 k += "-" + tofinger
-            v = self.lowget(k, frm)
-            return v
+            row = self.lowget(k, frm)
+            if row != None:
+                row.key_type = type
+                row.key_unique = unique
+                row.key_to = to
+            return row
 
         # type-tofinger-fromfinger-[unique]
         # for e.g. closedchat messages directed at a specific user.
@@ -205,8 +214,12 @@ class Client:
             k = type + "-" + tofinger + "-" + fromfinger
             if unique != None:
                 k += "-" + unique
-            v = self.lowget(k, frm)
-            return v
+            row = self.lowget(k, frm)
+            if row != None:
+                row.key_type = type
+                row.key_unique = unique
+                row.key_to = to
+            return row
 
         sys.stderr.write("get() can't guess key; %s %s %s %s\n" % (type,
                                                                    frm,
@@ -530,8 +543,11 @@ class Client:
         if finger == self.finger():
             return [ util.box(self.publickey()), self.nickname() ]
         h = util.hash(finger + self.masterrandom.hex())
-        x = self.get("known1", frm=self.nickname(), unique=h)
-        return x
+        row = self.get("known1", frm=self.nickname(), unique=h)
+        if row != None:
+            return row.value
+        else:
+            return None
 
     # do we know about the indicated nickname?
     # return [ boxedpublickey, nickname ] or None
@@ -539,8 +555,11 @@ class Client:
         if nickname == self.nickname():
             return [ util.box(self.publickey()), self.nickname() ]
         h = util.hash(nickname + self.masterrandom.hex())
-        x = self.get("known2", frm=self.nickname(), unique=h)
-        return x
+        row = self.get("known2", frm=self.nickname(), unique=h)
+        if row != None:
+            return row.value
+        else:
+            return None
 
     # fetch and return full "known" list.
     # each entry is [ boxedpublickey, nickname ]
@@ -564,12 +583,12 @@ def tests():
     # can I see my own puts?
     # type-fromfinger
     c1.put("v1", "type1")
-    assert c1.get("type1", frm=name1) == "v1"
+    assert c1.get("type1", frm=name1).value == "v1"
     # type-fromfinger-unique
     c1.put("v2", "type1", unique="uuu2")
     c1.put("v3", "type1", unique="uuu3")
-    assert c1.get("type1", frm=name1, unique="uuu2") == "v2"
-    assert c1.get("type1", frm=name1, unique="uuu3") == "v3"
+    assert c1.get("type1", frm=name1, unique="uuu2").value == "v2"
+    assert c1.get("type1", frm=name1, unique="uuu3").value == "v3"
 
     # make c1 and c2 know about each other by nickname.
     c1.save_known(name2, util.box(c2.publickey()))
@@ -586,9 +605,9 @@ def tests():
     assert c2.nickname2finger(c2.nickname()) == c2.finger()
 
     # can c2 see c1's puts?
-    assert c2.get("type1", frm=name1) == "v1"
-    assert c2.get("type1", frm=name1, unique="uuu2") == "v2"
-    assert c2.get("type1", frm=name1, unique="uuu3") == "v3"
+    assert c2.get("type1", frm=name1).value == "v1"
+    assert c2.get("type1", frm=name1, unique="uuu2").value == "v2"
+    assert c2.get("type1", frm=name1, unique="uuu3").value == "v3"
 
     # implicitly tests range().
     kn1 = c1.known_list()
