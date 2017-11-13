@@ -124,7 +124,7 @@ if __name__ == '__main__':
         for e in ll:
             print(e)
     else:
-        sys.stderr.write("Usage: chat nickname --new\n")
-        sys.stderr.write("       chat nickname --list\n")
-        sys.stderr.write("       chat nickname --join roomID\n")
+        sys.stderr.write("Usage: openchat nickname --new\n")
+        sys.stderr.write("       openchat nickname --list\n")
+        sys.stderr.write("       openchat nickname --join roomID\n")
         sys.exit(1)

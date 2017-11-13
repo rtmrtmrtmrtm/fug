@@ -324,15 +324,21 @@ class Client:
         else:
             tofinger = None
 
-        # type-fromfinger-[unique1,unique2] (for e.g. "known" rows).
+        # type-fromfinger-[tofinger]-[unique1,unique2] (for e.g. "known" rows).
         if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
-            k1 = type + "-" + fromfinger + "-" + unique[0]
-            k2 = type + "-" + fromfinger + "-" + unique[1]
+            k1 = type + "-" + fromfinger
+            if tofinger != None:
+                k1 += "-" + tofinger
+            k1 += "-" + unique[0]
+            k2 = type + "-" + fromfinger
+            if tofinger != None:
+                k2 += "-" + tofinger
+            k2 += "-" + unique[1]
             a = self.lowrange(k1, k2, frm, 0, None, 2)
             return a
 
         # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
-        if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
+        if fromfinger == None and isinstance(unique, list) and len(unique) == 2 and tofinger == None:
             k1 = type + "-" + unique[0]
             k2 = type + "-" + unique[1]
             a = self.lowrange(k1, k2, None, 0, None, 1)
