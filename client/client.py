@@ -280,7 +280,7 @@ class Client:
     # if signer!=None, only return lines signed by that nickname.
     # *_col (if not None) say which key columns hold various things,
     # used to create a Row.
-    def lowrange(self, key1, key2, signer, type_col, to_col, unique_col):
+    def lowrange(self, key1, key2, signer, type_col, to_col, unique_col, private):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
         self.send_json(s, [ "range", key1, key2 ])
@@ -290,6 +290,14 @@ class Client:
         x1 = [ ]
         for xx in x:
             # xx is [ key, [ value, signature, fingerprint ] ]
+            
+            if not isinstance(private, type(None)):
+                cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
+                vx = util.unhex(xx[1][0])
+                vy = cipher.decrypt(vx)
+                vz = vy.decode('utf-8')
+                xx[1][0] = vz
+
             if self.check(xx[0], xx[1]):
                 nickname = self.finger2nickname(xx[1][2])
                 if signer == None or signer == nickname:
@@ -334,9 +342,12 @@ class Client:
             fromfinger = None
 
         if to != None:
-            tofinger = self.nickname2finger(to)
+            assert to == self.nickname() # since we need private key
+            tofinger = self.finger()
+            to_priv = self.masterkey
         else:
             tofinger = None
+            to_priv = None
 
         # type-fromfinger-[tofinger]-[unique1,unique2] (for e.g. "known" rows).
         if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
@@ -348,14 +359,14 @@ class Client:
             if tofinger != None:
                 k2 += "-" + tofinger
             k2 += "-" + unique[1]
-            a = self.lowrange(k1, k2, frm, 0, None, 2)
+            a = self.lowrange(k1, k2, frm, 0, None, 2, to_priv)
             return a
 
         # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
         if fromfinger == None and isinstance(unique, list) and len(unique) == 2 and tofinger == None:
             k1 = type + "-" + unique[0]
             k2 = type + "-" + unique[1]
-            a = self.lowrange(k1, k2, None, 0, None, 1)
+            a = self.lowrange(k1, k2, None, 0, None, 1, to_priv)
             # XXX check that each is signed by its fromfinger.
             return a
 
@@ -635,13 +646,6 @@ def tests():
     c1.save_known(name2, util.box(c2.publickey()))
     c2.save_known(name1, util.box(c1.publickey()))
 
-    # sealed (encrypted)
-    c1.put("v8", "type3", unique="888", to=c2.nickname())
-    assert c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname()).value == "v8"
-    a = c2.range("type3", unique=["800","900"], frm=c1.nickname(), to=c2.nickname())
-    assert len(a) == 1
-    assert "v8" in [ x.value for x in a ]
-
     # check that c1 and c2 know about each other.
     assert c1.finger2nickname(c1.finger()) == c1.nickname()
     assert c1.finger2nickname(c2.finger()) == c2.nickname()
@@ -677,6 +681,15 @@ def tests():
     assert "v5"+name1 in [ x.value for x in a ]
     assert "v6"+name1 in [ x.value for x in a ]
     assert "v7"+name1 not in [ x.value for x in a ]
+
+    # sealed (encrypted) put/get
+    c1.put("v8", "type3", unique="888", to=c2.nickname())
+    assert c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname()).value == "v8"
+
+    # sealed range()
+    a = c2.range("type3", unique=["800","900"], frm=c1.nickname(), to=c2.nickname())
+    assert len(a) == 1
+    assert "v8" in [ x.value for x in a ]
 
 if __name__ == '__main__':
     tests()
