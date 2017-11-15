@@ -47,15 +47,18 @@ class Link:
         # the phrase.
         # our own name for ourself.
         # our name for the target person.
+        # we expect the other party to be able to find
+        # our record with a range() with unique=phrase;
+        # the range() is needed b/c they don't know fromfinger.
         # XXX the link DB entry should expire quickly.
         pub = c.publickey().exportKey('PEM').hex()
         value = [ 'link1', pub, phrase, message ]
-        c.put(phrase, value)
+        c.put(value, 'link1', unique=phrase)
 
-        # check that something else wasn't already there with key=phrase.
-        vx = c.get(phrase)
-        if vx != value:
-            printf("Oops, try again, phrase collision.")
+        # check that something else wasn't already there with unique=phrase.
+        vx = c.range('link1', unique=[ phrase, phrase+"~" ] )
+        if len(vx) != 1 or vx[0].value != value or vx[0].nickname != self.nickname:
+            print("Oops, try again, phrase collision.")
             sys.exit(1)
 
         print("The phrase is %s" % (phrase))
@@ -63,16 +66,20 @@ class Link:
         print("Waiting for a reply from %s..." % (othername))
 
         while True:
-            vy = c.get(phrase + "-answer")
-            if vy != None:
+            vy = c.range('link2', to=self.nickname, unique=[ phrase, phrase+"~" ])
+            if len(vy) > 0:
                 break
             time.sleep(1)
 
-        if type(vy) != list or len(vy) != 4:
+        if len(vy) != 1 or type(vy[0].value) != list or len(vy[0].value) != 4:
             print("Phrase entry is wrong in DB.")
             sys.exit(1)
+            
+        if vy[0].key_to != self.nickname:
+            print("Reply was not sealed for you.")
+            sys.exit(1)
 
-        [ xlink, xpub, xphrase, xmessage ] = vy
+        [ xlink, xpub, xphrase, xmessage ] = vy[0].value
         if xlink != 'link2' or xphrase != phrase:
             print("Answering phrase is wrong in DB.")
             sys.exit(1)
@@ -90,12 +97,21 @@ class Link:
         c = client.Client(self.nickname)
 
         # othername already inserted info under phrase.
-        value = c.get(phrase)
-        if value == None or type(value) != list or len(value) != 4:
+        values = c.range('link1', unique=[ phrase, phrase+"~" ])
+
+        if len(values) == 0:
+            print("Phrase entry is missing in DB.")
+            sys.exit(1)
+
+        if len(values) > 1:
+            print("Too many phrase entries in DB!")
+            sys.exit(1)
+
+        if type(values[0].value) != list or len(values[0].value) != 4:
             print("Phrase entry is wrong or missing in DB.")
             sys.exit(1)
 
-        [ xlink, xpub, xphrase, xmessage ] = value
+        [ xlink, xpub, xphrase, xmessage ] = values[0].value
         if xlink != 'link1' or xphrase != phrase:
             print("Phrase has bad content in DB.")
             sys.exit(1)
@@ -109,23 +125,17 @@ class Link:
         sys.stdout.flush()
         mymessage = sys.stdin.readline().strip()
 
+        # insert into our known list in the DB.
+        c.save_known(othername, xpub)
+
         # now insert an answer into the DB.
         # the statement is "the [other] person who knows the phrase has public key X".
         # key is phrase-answer
         pub = util.box(c.publickey())
         value = [ 'link2', pub, phrase, mymessage ]
-        c.put(phrase + "-answer", value)
-
-        # check that something else wasn't already there with key=phrase.
-        vx = c.get(phrase + "-answer")
-        if vx != value:
-            printf("Phrase collision!")
-            sys.exit(1)
+        c.put(value, 'link2', unique=phrase, to=othername)
 
         print("%s should see your answer now." % (othername))
-
-        # insert into our known list in the DB.
-        c.save_known(othername, xpub)
 
     def list(self):
         c = client.Client(self.nickname)
