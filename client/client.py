@@ -121,10 +121,7 @@ class Client:
         myfinger = self.finger()
 
         if not isinstance(seal_pub, type(None)):
-            cipher = Crypto.Cipher.PKCS1_OAEP.new(seal_pub)
-            vbytes = v.encode('utf-8') # str -> bytes
-            v = cipher.encrypt(vbytes)
-            v = util.hex(v) # bytes -> str, for JSON
+            v = self.seal(seal_pub, v)
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(self.hostport)
@@ -141,6 +138,22 @@ class Client:
         x = self.recv_json(s)
         s.close()
         return x
+
+    def seal(self, public, value):
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(public)
+        vbytes = bytes(json.dumps(value), 'utf-8')
+        # XXX vbytes probably can't be longer than the RSA key size?
+        v = cipher.encrypt(vbytes)
+        v = util.hex(v) # bytes -> str, for JSON
+        return v
+
+    def unseal(self, private, value):
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
+        vx = util.unhex(value)
+        vy = cipher.decrypt(vx)
+        vz = vy.decode('utf-8')
+        vz = json.loads(vz)
+        return vz
 
     # returns a Row (just value and nickname), or None.
     # checks that the key+value is signed by the public
@@ -160,11 +173,7 @@ class Client:
         # v is [ value, signature, fingerprint ]
 
         if not isinstance(private, type(None)):
-            cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
-            vx = util.unhex(v[0])
-            vy = cipher.decrypt(vx)
-            vz = vy.decode('utf-8')
-            v[0] = vz
+            v[0] = self.unseal(private, v[0])
 
         if self.check(k, v) == False:
             # signature did not verify at all.
@@ -185,7 +194,8 @@ class Client:
     # sub-key info that the corresponding put() used.
     # to and frm are nicknames.
     # returns a Row, so the caller can learn about key and nickname.
-    # XXX can there be more than one matching result?
+    # XXX frm has to be supplied, otherwise there can be more
+    #     than one result; if frm isn't known, use range().
     # XXX unseal if needed.
     # XXX to has to be me! otherwise can't unseal.
     def get(self, typename, frm=None, to=None, unique=None):
@@ -292,11 +302,7 @@ class Client:
             # xx is [ key, [ value, signature, fingerprint ] ]
             
             if not isinstance(private, type(None)):
-                cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
-                vx = util.unhex(xx[1][0])
-                vy = cipher.decrypt(vx)
-                vz = vy.decode('utf-8')
-                xx[1][0] = vz
+                xx[1][0] = self.unseal(private, xx[1][0])
 
             if self.check(xx[0], xx[1]):
                 nickname = self.finger2nickname(xx[1][2])
@@ -363,11 +369,10 @@ class Client:
             return a
 
         # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
-        if fromfinger == None and isinstance(unique, list) and len(unique) == 2 and tofinger == None:
+        if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
             k1 = type + "-" + unique[0]
             k2 = type + "-" + unique[1]
             a = self.lowrange(k1, k2, None, 0, None, 1, to_priv)
-            # XXX check that each is signed by its fromfinger.
             return a
 
         sys.stderr.write("range() can't guess scheme; %s %s %s %s\n" % (type,
@@ -636,6 +641,8 @@ def tests():
     # type-fromfinger
     c1.put("v1", "type1")
     assert c1.get("type1", frm=name1).value == "v1"
+    c1.put(["v1"], "type1list")
+    assert c1.get("type1list", frm=name1).value == ["v1"]
     # type-fromfinger-unique
     c1.put("v2", "type1", unique="uuu2")
     c1.put("v3", "type1", unique="uuu3")
@@ -683,13 +690,17 @@ def tests():
     assert "v7"+name1 not in [ x.value for x in a ]
 
     # sealed (encrypted) put/get
-    c1.put("v8", "type3", unique="888", to=c2.nickname())
-    assert c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname()).value == "v8"
+    v8 = "v8" + name1
+    c1.put(v8, "type3", unique="888", to=c2.nickname())
+    assert c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname()).value == v8
+
+    c1.put(["v9"], "type3", unique="999", to=c2.nickname())
+    assert c2.get("type3", unique="999", frm=c1.nickname(), to=c2.nickname()).value == ["v9"]
 
     # sealed range()
     a = c2.range("type3", unique=["800","900"], frm=c1.nickname(), to=c2.nickname())
     assert len(a) == 1
-    assert "v8" in [ x.value for x in a ]
+    assert v8 in [ x.value for x in a ]
 
 if __name__ == '__main__':
     tests()
