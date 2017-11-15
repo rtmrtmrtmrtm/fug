@@ -29,6 +29,7 @@ import Crypto.Hash.SHA256
 import Crypto.PublicKey.RSA
 import Crypto.Signature.PKCS1_PSS
 import Crypto.Cipher.PKCS1_OAEP
+import Crypto.Cipher.AES
 
 sys.path.append("../util")
 import util
@@ -139,21 +140,38 @@ class Client:
         s.close()
         return x
 
+    # returns [ hex public-key-encrypted aes key, hex aes-encrypted value ]
     def seal(self, public, value):
-        cipher = Crypto.Cipher.PKCS1_OAEP.new(public)
-        vbytes = bytes(json.dumps(value), 'utf-8')
-        # XXX vbytes probably can't be longer than the RSA key size?
-        v = cipher.encrypt(vbytes)
-        v = util.hex(v) # bytes -> str, for JSON
-        return v
+        value = bytes(json.dumps(value), 'utf-8')
 
-    def unseal(self, private, value):
+        # encrypt with a random AES key.
+        # then seal the AES key with the public key.
+        aeskey = util.randbytes(32)
+        iv = util.randbytes(Crypto.Cipher.AES.block_size)
+        aescipher = Crypto.Cipher.AES.new(aeskey, Crypto.Cipher.AES.MODE_CFB, iv)
+        sealedvalue = iv + aescipher.encrypt(value)
+
+        cipher = Crypto.Cipher.PKCS1_OAEP.new(public)
+        sealedkey = cipher.encrypt(aeskey)
+        both = [ util.hex(sealedkey),
+                 util.hex(sealedvalue) ]
+        return both
+
+    def unseal(self, private, both):
+        [ sealedkey, iv_sealedvalue ] = both
+        sealedkey = util.unhex(sealedkey) # public-key encrypted aes key
+        iv_sealedvalue = util.unhex(iv_sealedvalue) # aes-encrypted value
+
         cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
-        vx = util.unhex(value)
-        vy = cipher.decrypt(vx)
-        vz = vy.decode('utf-8')
-        vz = json.loads(vz)
-        return vz
+        aeskey = cipher.decrypt(sealedkey)
+
+        iv = iv_sealedvalue[0:Crypto.Cipher.AES.block_size]
+        sealedvalue = iv_sealedvalue[Crypto.Cipher.AES.block_size:]
+        
+        aescipher = Crypto.Cipher.AES.new(aeskey, Crypto.Cipher.AES.MODE_CFB, iv)
+        value = aescipher.decrypt(sealedvalue)
+
+        return json.loads(value.decode('utf-8'))
 
     # returns a Row (just value and nickname), or None.
     # checks that the key+value is signed by the public
@@ -630,11 +648,11 @@ class Client:
 
 
 def tests():
-    name1 = util.hex(Crypto.Random.new().read(32))[0:6]
+    name1 = util.randhex(6)
+    name2 = util.randhex(6)
+    name3 = util.randhex(6)
     c1 = Client(name1)
-    name2 = util.hex(Crypto.Random.new().read(32))[0:6]
     c2 = Client(name2)
-    name3 = util.hex(Crypto.Random.new().read(32))[0:6]
     c3 = Client(name3)
 
     # can I see my own puts?

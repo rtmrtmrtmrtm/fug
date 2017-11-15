@@ -57,7 +57,9 @@ def yn():
         sys.stdout.write("Please answer y or n: ")
 
 
+def randbytes(n):
+    return Crypto.Random.new().read(n)
+
 # a str with n bytes of random hex.
 def randhex(n):
-    rrr = Crypto.Random.new().read(n)
-    return rrr.hex()[0:n]
+    return randbytes(n).hex()[0:n]
