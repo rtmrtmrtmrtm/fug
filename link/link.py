@@ -35,6 +35,7 @@ class Link:
     # we want to initiate a link to someone and call them othername.
     def gofirst(self, othername):
         c = client.Client(self.nickname)
+        print("my finger %s" % (c.finger()))
         phrase = self.make_phrase()
 
         sys.stdout.write("Enter a personal message for %s: " % (othername))
@@ -95,6 +96,7 @@ class Link:
     # we want to respond to a link from someone and call them othername.
     def gosecond(self, othername, phrase):
         c = client.Client(self.nickname)
+        print("my finger %s" % (c.finger()))
 
         # othername already inserted info under phrase.
         values = c.range('link1', unique=[ phrase, phrase+"~" ])

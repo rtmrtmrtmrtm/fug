@@ -77,6 +77,7 @@ class Client:
             tofinger = self.nickname2finger(to)
             to_pub = self.finger2public(tofinger)
             assert not isinstance(to_pub, type(None))
+            print("sealing a %s to=%s" % (typename, tofinger))
         else:
             tofinger = None
             to_pub = None
@@ -157,13 +158,18 @@ class Client:
                  util.hex(sealedvalue) ]
         return both
 
+    # can return None
     def unseal(self, private, both):
         [ sealedkey, iv_sealedvalue ] = both
         sealedkey = util.unhex(sealedkey) # public-key encrypted aes key
         iv_sealedvalue = util.unhex(iv_sealedvalue) # aes-encrypted value
 
         cipher = Crypto.Cipher.PKCS1_OAEP.new(private)
-        aeskey = cipher.decrypt(sealedkey)
+        try:
+            aeskey = cipher.decrypt(sealedkey)
+        except ValueError:
+            print("AES decrypt failed")
+            return None
 
         iv = iv_sealedvalue[0:Crypto.Cipher.AES.block_size]
         sealedvalue = iv_sealedvalue[Crypto.Cipher.AES.block_size:]
@@ -289,6 +295,7 @@ class Client:
         if isinstance(public, type(None)):
             # couldn't find finger in DB,
             # or it didn't match the public key.
+            print("check finger/public match failed")
             return False
         
         # v is [ value, signature, fingerprint ]
@@ -300,6 +307,7 @@ class Client:
         verifier = Crypto.Signature.PKCS1_PSS.new(public)
         ok = verifier.verify(h, util.unhex(v[1]))
         if ok == False:
+            print("check verify() failed")
             return False
 
         return True
@@ -335,7 +343,11 @@ class Client:
                         key_to = keyvec[to_col]
                         # XXX Row.key_to wants a nickname!
                         # but it's always to=us...
-                        assert key_to == self.finger()
+                        if key_to != self.finger():
+                            # we can only unseal to=ourselves.
+                            print("sealed for someone else %s" % (key_to))
+                            print("I am %s" % (self.finger()))
+                            continue
                         key_to = self.nickname()
                     if unique_col != None:
                         key_unique = keyvec[unique_col]
@@ -363,7 +375,7 @@ class Client:
     # XXX unseal.
     # XXX the returned keys won't be meaningful, should translate
     #     back to argument scheme.
-    def range(self, type, frm=None, to=None, unique=None):
+    def range(self, typename, frm=None, to=None, unique=None):
         if frm != None:
             fromfinger = self.nickname2finger(frm)
         else:
@@ -381,13 +393,13 @@ class Client:
         if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
             to_col = None
             unique_col = 2
-            k1 = type + "-" + fromfinger
+            k1 = typename + "-" + fromfinger
             if tofinger != None:
                 k1 += "-" + tofinger
                 to_col = 2
                 unique_col += 1
             k1 += "-" + unique[0]
-            k2 = type + "-" + fromfinger
+            k2 = typename + "-" + fromfinger
             if tofinger != None:
                 k2 += "-" + tofinger
             k2 += "-" + unique[1]
@@ -396,16 +408,16 @@ class Client:
 
         # type-[unique1,unique2]-fromfinger-[tofinger] (for e.g. openchat messages).
         if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
-            if to_priv != None:
-                to_col = 3
-            else:
+            if isinstance(to_priv, type(None)):
                 to_col = None
-            k1 = type + "-" + unique[0]
-            k2 = type + "-" + unique[1]
+            else:
+                to_col = 3
+            k1 = typename + "-" + unique[0]
+            k2 = typename + "-" + unique[1]
             a = self.lowrange(k1, k2, None, 0, to_col, 1, to_priv)
             return a
 
-        sys.stderr.write("range() can't guess scheme; %s %s %s %s\n" % (type,
+        sys.stderr.write("range() can't guess scheme; %s %s %s %s\n" % (typename,
                                                                         frm,
                                                                         to,
                                                                         unique))
@@ -679,9 +691,13 @@ def tests():
     assert c1.get("type1", frm=name1, unique="uuu2").value == "v2"
     assert c1.get("type1", frm=name1, unique="uuu3").value == "v3"
 
-    # make c1 and c2 know about each other by nickname.
+    # make c1, c2 know about each other by nickname.
     c1.save_known(name2, util.box(c2.publickey()))
     c2.save_known(name1, util.box(c1.publickey()))
+
+    # make c1, c3 know about each other by nickname.
+    c1.save_known(name3, util.box(c3.publickey()))
+    c3.save_known(name1, util.box(c1.publickey()))
 
     # check that c1 and c2 know about each other.
     assert c1.finger2nickname(c1.finger()) == c1.nickname()
@@ -701,8 +717,9 @@ def tests():
     # implicitly tests range().
     kn1 = c1.known_list()
     # kn1 is [ [ public, nickname ], ... ]
-    assert len(kn1) == 1
+    assert len(kn1) == 2
     assert c2.nickname() in [ x[1] for x in kn1 ]
+    assert c3.nickname() in [ x[1] for x in kn1 ]
 
     # range() type-fromfinger-[unique1,unique2]
     c1.put("v4"+name1, "type2", unique="aaa")
@@ -730,12 +747,28 @@ def tests():
     c1.put(["v9"], "type3", unique="999", to=c2.nickname())
     assert c2.get("type3", unique="999", frm=c1.nickname(), to=c2.nickname()).value == ["v9"]
 
-    # sealed range()
+    # sealed range(), primary key fromfinger
     a = c2.range("type3", unique=["800","900"], frm=c1.nickname(), to=c2.nickname())
     assert len(a) == 1
     assert v8 in [ x.value for x in a ]
     assert a[0].key_to == c2.nickname()
     assert a[0].nickname == c1.nickname()
+
+    # sealed range(), primary key unique
+    a = c2.range("type3", unique=["800","900"], to=c2.nickname())
+    assert len(a) == 1
+    assert v8 in [ x.value for x in a ]
+    assert a[0].key_to == c2.nickname()
+    assert a[0].nickname == c1.nickname()
+
+    a = c3.range("type3", unique=["800", "900"])
+    assert len(a) == 0
+    a = c3.range("type3", unique=["800", "900"], to=c3.nickname())
+    assert len(a) == 0
+    a = c3.range("type3", unique=["800", "900"], frm=c1.nickname())
+    assert len(a) == 0
+    a = c3.range("type3", unique=["800", "900"], frm=c1.nickname(), to=c3.nickname())
+    assert len(a) == 0
 
 if __name__ == '__main__':
     tests()
