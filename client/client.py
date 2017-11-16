@@ -333,6 +333,10 @@ class Client:
                         key_type = keyvec[type_col]
                     if to_col != None:
                         key_to = keyvec[to_col]
+                        # XXX Row.key_to wants a nickname!
+                        # but it's always to=us...
+                        assert key_to == self.finger()
+                        key_to = self.nickname()
                     if unique_col != None:
                         key_unique = keyvec[unique_col]
                     row = Row(xx[1][0],
@@ -375,22 +379,30 @@ class Client:
 
         # type-fromfinger-[tofinger]-[unique1,unique2] (for e.g. "known" rows).
         if fromfinger != None and isinstance(unique, list) and len(unique) == 2:
+            to_col = None
+            unique_col = 2
             k1 = type + "-" + fromfinger
             if tofinger != None:
                 k1 += "-" + tofinger
+                to_col = 2
+                unique_col += 1
             k1 += "-" + unique[0]
             k2 = type + "-" + fromfinger
             if tofinger != None:
                 k2 += "-" + tofinger
             k2 += "-" + unique[1]
-            a = self.lowrange(k1, k2, frm, 0, None, 2, to_priv)
+            a = self.lowrange(k1, k2, frm, 0, to_col, unique_col, to_priv)
             return a
 
-        # type-[unique1,unique2]-fromfinger (for e.g. openchat messages).
+        # type-[unique1,unique2]-fromfinger-[tofinger] (for e.g. openchat messages).
         if fromfinger == None and isinstance(unique, list) and len(unique) == 2:
+            if to_priv != None:
+                to_col = 3
+            else:
+                to_col = None
             k1 = type + "-" + unique[0]
             k2 = type + "-" + unique[1]
-            a = self.lowrange(k1, k2, None, 0, None, 1, to_priv)
+            a = self.lowrange(k1, k2, None, 0, to_col, 1, to_priv)
             return a
 
         sys.stderr.write("range() can't guess scheme; %s %s %s %s\n" % (type,
@@ -710,7 +722,10 @@ def tests():
     # sealed (encrypted) put/get
     v8 = "v8" + name1
     c1.put(v8, "type3", unique="888", to=c2.nickname())
-    assert c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname()).value == v8
+    row = c2.get("type3", unique="888", frm=c1.nickname(), to=c2.nickname())
+    assert row.key_to == c2.nickname()
+    assert row.nickname == c1.nickname()
+    assert row.value == v8
 
     c1.put(["v9"], "type3", unique="999", to=c2.nickname())
     assert c2.get("type3", unique="999", frm=c1.nickname(), to=c2.nickname()).value == ["v9"]
@@ -719,6 +734,8 @@ def tests():
     a = c2.range("type3", unique=["800","900"], frm=c1.nickname(), to=c2.nickname())
     assert len(a) == 1
     assert v8 in [ x.value for x in a ]
+    assert a[0].key_to == c2.nickname()
+    assert a[0].nickname == c1.nickname()
 
 if __name__ == '__main__':
     tests()
