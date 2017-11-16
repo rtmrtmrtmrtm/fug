@@ -73,11 +73,13 @@ class Client:
     #     the key, to prevent squatting.
     # XXX seal for to's eyes only.
     def put(self, v, typename, to=None, unique=None):
+        assert not "-" in typename
+        assert unique == None or (not "-" in unique)
+
         if to != None:
             tofinger = self.nickname2finger(to)
             to_pub = self.finger2public(tofinger)
             assert not isinstance(to_pub, type(None))
-            print("sealing a %s to=%s" % (typename, tofinger))
         else:
             tofinger = None
             to_pub = None
@@ -223,6 +225,9 @@ class Client:
     # XXX unseal if needed.
     # XXX to has to be me! otherwise can't unseal.
     def get(self, typename, frm=None, to=None, unique=None):
+        assert not "-" in typename
+        assert unique == None or (not "-" in unique)
+
         if frm != None:
             fromfinger = self.nickname2finger(frm)
         else:
@@ -376,6 +381,8 @@ class Client:
     # XXX the returned keys won't be meaningful, should translate
     #     back to argument scheme.
     def range(self, typename, frm=None, to=None, unique=None):
+        assert not "-" in typename
+
         if frm != None:
             fromfinger = self.nickname2finger(frm)
         else:
